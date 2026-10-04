@@ -18,6 +18,7 @@ The [main README](../README.md) covers what RustyBox is and how to get started. 
 | [Content and updates](content-and-updates.md) | Mods, trainers, homebrew, cheats, saves, title updates. |
 | [USB and extras](usb-and-extras.md) | Bad Avatar sticks, backups, notifications, scheduled scans. |
 | [IGDB](igdb.md) | Cover art and game details. |
+| [Dashboards](integrations.md) | JSON endpoints for Glance and other dashboards. |
 
 ## For developers
 
