@@ -39,7 +39,7 @@ export async function render(root, ctx) {
       <div class="page-head row"><div class="grow"><h1>💽 ${esc(drive.lib.name)}</h1>
         <div class="muted">${h.online ? `<span class="badge ok">online</span>` : `<span class="badge err">offline</span>`} ${h.remote_name ? "attached to " + esc(h.remote_name) + " · " : ""}${esc(h.fs_type || "")}${h.max_file ? " · single files must be under 4 GB" : ""}${h.share_read_only ? " · shared read-only" : ""}</div></div>
         ${drives.length > 1 ? `<select id="d-pick">${drives.map((d) => `<option value="${d.lib.id}" ${d === drive ? "selected" : ""}>${esc(d.lib.name)}</option>`).join("")}</select>` : ""}
-        <button class="btn primary" id="d-add" ${drive.path.writable && h.online ? "" : "disabled"}>Add games…</button><button class="btn" id="d-tidy" ${drive.path.writable && h.online ? "" : "disabled"}>Tidy folders…</button><button class="btn" id="d-fix" ${drive.path.writable && h.online ? "" : "disabled"}>Fix misplaced items…</button><button class="btn" id="d-scan">Rescan the drive</button><a class="btn" href="#library/${drive.lib.id}">Open as a library</a></div>
+        <button class="btn primary" id="d-add" ${drive.path.writable && h.online ? "" : "disabled"}>Add games…</button><button class="btn" id="d-tidy" ${drive.path.writable && h.online ? "" : "disabled"}>Tidy folders…</button><button class="btn" id="d-fix" ${drive.path.writable && h.online ? "" : "disabled"}>Fix misplaced items…</button><button class="btn" id="d-scan">Rescan the drive</button><button class="btn" id="d-browser" title="Share the drive from this browser instead of through an agent program">Use this browser…</button><a class="btn" href="#library/${drive.lib.id}">Open as a library</a></div>
       ${h.online ? `<div class="card">${h.total >= 2 ** 49 ? `<div class="row"><b>Free space isn't known</b><span class="muted">a browser can't see how much room the drive has; a copy stops with a message if it fills up</span></div>` : `<div class="row"><b>${fmtBytes(h.free)} free</b><span class="muted">of ${fmtBytes(h.total)}</span><div class="grow"></div><span class="muted">${used}% used</span></div>
           <div class="bar" style="margin-top:8px"><i style="width:${used}%"></i></div>`}
           ${drive.path.writable ? "" : `<div class="notice warn" style="margin-top:10px">This drive is read-only here${h.share_read_only ? " (the agent was started with --read-only)" : ": turn on Writable for its folder on the library page"}, so games can't be copied to it.</div>`}</div>`
@@ -78,6 +78,17 @@ export async function render(root, ctx) {
     }));
     $("#d-tidy").onclick = () => tidyDialog(drive.lib, ctx);
     $("#d-fix").onclick = () => misplacedDialog(drive.lib, ctx);
+    $("#d-browser").onclick = async () => {
+      if (!browserDrive.supported()) { alert(`Sharing a drive from the browser needs a secure page in Chrome, Edge or Brave. Open RustyBox at ${browserDrive.secureAddress()} (the browser warns about the certificate once), then try again.`); return; }
+      try {
+        const handle = await browserDrive.choose(!!drive.path.writable);
+        if (!confirm(`Share the folder "${handle.name}" from this browser as the drive "${drive.lib.name}"?\n\nIts folders (${drive.remote.map((p) => p.remote_subdir || "the whole drive").join(", ")}) stay as they are; only how RustyBox reaches the drive changes. Keep a RustyBox page open while you use it.`)) return;
+        const shared = await browserDrive.share({ handle, name: drive.lib.name, writable: !!drive.path.writable, fsType: "fat32" });
+        await api(`/api/libraries/${drive.lib.id}/reconnect`, { body: { url: shared.url, token: shared.token } });
+        toast("Connected from this browser", "ok");
+        location.reload();
+      } catch (e) { if (e.name !== "AbortError") toast(e.message, "err"); }
+    };
     if ($("#d-reconnect")) $("#d-reconnect").onclick = async () => { try { await browserDrive.reconnect(mine.id); toast("Reconnected", "ok"); location.reload(); } catch (e) { toast(e.message, "err"); } };
     $("#d-scan").onclick = async () => { try { const { job } = await api(`/api/libraries/${drive.lib.id}/scan`, { method: "POST" }); ctx.openJob(job); } catch (e) { toast(e.message, "err"); } };
     if (main) compare(); else $("#d-out").innerHTML = `<div class="notice">Add a GOD or ISO library of your own first, then you can compare it with the drive.</div>`;

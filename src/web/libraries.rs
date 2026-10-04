@@ -28,6 +28,7 @@ pub fn routes() -> Router<std::sync::Arc<super::AppState>> {
             get(get_one).put(rename).delete(remove),
         )
         .route("/api/libraries/{id}/paths", post(add_path))
+        .route("/api/libraries/{id}/reconnect", post(reconnect))
         .route(
             "/api/libraries/{id}/paths/{pid}",
             put(update_path).delete(remove_path),
@@ -636,6 +637,46 @@ async fn remote_test(Json(req): Json<RemoteTestReq>) -> ApiResult<Json<Value>> {
         "name": info.name, "root": info.root, "read_only": info.read_only, "version": info.version,
         "fs_type": info.fs.fs_type, "total": info.fs.total, "free": info.fs.free, "max_file": info.fs.max_file,
     })))
+}
+
+#[derive(Deserialize)]
+struct ReconnectReq {
+    url: String,
+    token: String,
+}
+
+/// Point a library's drive folders at a different connection (for example, from the agent program
+/// to a browser), keeping the library, its folders' roles and everything scanned so far.
+async fn reconnect(
+    State(st): S,
+    UrlPath(id): UrlPath<i64>,
+    Json(req): Json<ReconnectReq>,
+) -> ApiResult<Json<Value>> {
+    let url = crate::remote::clean_url(&req.url)?;
+    let token = req.token.trim().to_string();
+    let remote = crate::remote::Remote::new(&url, &token);
+    let info = tokio::task::spawn_blocking(move || remote.info())
+        .await
+        .map_err(|e| Error::backend(e.to_string()))??;
+    let (u2, t2) = (url.clone(), token.clone());
+    let n = st
+        .db
+        .run(move |c| {
+            let mut n = 0;
+            for p in library::get_library(c, id)?.paths.iter().filter(|p| p.remote_url.is_some()) {
+                let sub = p.remote_subdir.clone().unwrap_or_default();
+                let path = if sub.is_empty() { u2.clone() } else { format!("{u2}/{sub}") };
+                // A drive shared read-only can't be made writable from this side.
+                let writable = p.writable && !info.read_only;
+                n += c.execute(
+                    "UPDATE library_paths SET remote_url = ?1, remote_token = ?2, path = ?3, writable = ?4 WHERE id = ?5 AND library_id = ?6",
+                    rusqlite::params![u2, t2, path, writable, p.id, id],
+                )?;
+            }
+            Ok(n)
+        })
+        .await?;
+    Ok(Json(json!({"updated": n})))
 }
 
 // ── Comparing two libraries ──────────────────────────────────────────────────

@@ -298,6 +298,25 @@ async fn a_drive_in_a_browser_is_listed_read_scanned_and_written_like_an_agent()
     })
     .await;
     assert!(!s.root.join("Out/b.bin").exists() && s.root.join("Out/sub").is_dir());
+
+    // A library made for the drive can be pointed at a new connection and keeps its folders.
+    let (port, u, t) = (s.port, url.clone(), token.clone());
+    let updated = blocking(move || {
+        let made: Value = ureq::post(&format!("http://127.0.0.1:{port}/api/libraries"))
+            .send_json(json!({"name": "Xbox drive", "kind": "god", "paths": [{"remote": {"url": u, "token": t, "subdir": "Games"}, "writable": true}]}))
+            .unwrap()
+            .into_json()
+            .unwrap();
+        let id = made["id"].as_i64().unwrap();
+        let r: Value = ureq::post(&format!("http://127.0.0.1:{port}/api/libraries/{id}/reconnect"))
+            .send_json(json!({"url": u, "token": t}))
+            .unwrap()
+            .into_json()
+            .unwrap();
+        r["updated"].as_u64().unwrap()
+    })
+    .await;
+    assert_eq!(updated, 1);
 }
 
 #[tokio::test]
