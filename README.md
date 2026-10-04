@@ -53,7 +53,7 @@ No ads. No subscriptions. No tracking. No paywalled "pro" tier. Ever.
 | 🕹️ **Straight to the console** | Browse, scan, compare and send games to your Xbox 360 over FTP (Aurora). Replace a game without losing its saves. |
 | 💽 **Manage the Xbox's hard drive** | Compare the drive with your library, mirror it, tidy it, and find add-ons and updates that are in the wrong folder, without ever unplugging it from its PC. |
 | 🧭 **Discover and download** | Browse every Xbox 360 game on IGDB, see similar games, then grab one from **Usenet or torrents**. It is downloaded, converted to GOD, put in your library, copied to the drive and sent to the console, automatically if you want. |
-| 🧲 **Torrents, your way** | Search torrent indexers like you do Usenet, or open a `.torrent` file, **tick just the files you want** out of thousands, and qBittorrent downloads only those. |
+| 🧲 **Torrents, your way** | Search torrent indexers like you do Usenet, or open a `.torrent` file, **tick just the files you want** out of thousands, and qBittorrent downloads only those. From a wanted game, **search inside your torrent files** (pick the folder, or one torrent) and grab just that game. |
 | 🧩 **Mods, trainers and updates** | Install mods, trainers and homebrew, and find and install title updates, all with a preview of exactly where each file goes. |
 | 🔌 **USB tools** | Build a Bad Avatar stick, format and back up USB drives. Only removable sticks are ever offered. |
 | 🛡️ **Safe by design** | Plan before you act. Nothing is deleted or overwritten without a preview you approve. Writes go to `.part` files and are renamed when complete. |
@@ -193,7 +193,7 @@ Plug the drive into a PC and run the tiny drive agent there ([how](docs/installa
 
 - **Discover** lists every Xbox 360 game on IGDB with similar games. Add one to **Wanted**, or download it straight away.
 - **Wanted → Setup** takes your Usenet indexers (or imports them from Prowlarr), SABnzbd and, for torrents, qBittorrent. Pick the library finished games go to, and optionally copy them to the Xbox drive and send them to the console.
-- **Torrents** lists your folders of `.torrent` files. Open one, filter, **tick only the games you want**, and only those are downloaded. Zipped discs are unpacked for you.
+- **Torrents** lists your folders of `.torrent` files. Open one, filter, **tick only the games you want**, and only those are downloaded. Zipped discs are unpacked for you. A wanted game can also be searched for *inside* those torrents.
 - Whichever way a game arrives, the chain is the same: **download → unpack → convert to GOD → library → drive → console**, tracked in **Wanted → Activity**.
 
 Details: [Wanted](docs/wanted.md) · [Torrents](docs/torrents.md)

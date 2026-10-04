@@ -558,7 +558,7 @@ async fn make_qbit_category(State(st): S, Json(r): Json<CatReq>) -> ApiResult<Js
 
 // ── The wanted list ──────────────────────────────────────────────────────────
 
-fn names_for(w: &Wanted) -> Vec<String> {
+pub(super) fn names_for(w: &Wanted) -> Vec<String> {
     igdb::rank::variants(&w.name)
 }
 

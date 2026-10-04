@@ -1377,7 +1377,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "rustybox"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "anyhow",
  "argon2",

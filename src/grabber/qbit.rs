@@ -431,8 +431,15 @@ impl Qbit {
             .unwrap_or_default())
     }
 
-    /// Don't fetch these files (priority 0). Done in batches so the request stays a sensible size.
+    /// Don't fetch these files (priority 0).
     pub fn skip_files(&self, hash: &str, indexes: &[usize]) -> Result<(), Error> {
+        self.set_priority(hash, indexes, 0)
+    }
+
+    /// Set the priority of some of a torrent's files (0 = skip, 1 = normal). Done in batches so
+    /// the request stays a sensible size.
+    pub fn set_priority(&self, hash: &str, indexes: &[usize], prio: u8) -> Result<(), Error> {
+        let prio = prio.to_string();
         for chunk in indexes.chunks(1500) {
             let ids = chunk
                 .iter()
@@ -441,7 +448,11 @@ impl Qbit {
                 .join("|");
             self.post(
                 "torrents/filePrio",
-                &[("hash", hash), ("id", ids.as_str()), ("priority", "0")],
+                &[
+                    ("hash", hash),
+                    ("id", ids.as_str()),
+                    ("priority", prio.as_str()),
+                ],
             )?;
         }
         Ok(())

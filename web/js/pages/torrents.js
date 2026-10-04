@@ -89,7 +89,7 @@ export async function render(root, ctx) {
     let filter = "", limit = 300;
     const modal = el(`<div class="modal-bg"><div class="modal wide" style="height:min(86vh,820px)"><header class="row"><div class="grow"><b>${esc(t.name)}</b><div class="muted" style="font-size:12.5px;font-weight:400">${t.files.length.toLocaleString()} file${t.files.length === 1 ? "" : "s"} · ${fmtBytes(t.total)} in all · <span class="mono">${esc(t.info_hash.slice(0, 12))}…</span></div></div></header>
       <div class="body" style="padding-top:12px;display:flex;flex-direction:column;gap:10px;min-height:0">
-        ${info.already_in_client ? `<div class="notice warn">This torrent is already in qBittorrent. Change which of its files to fetch there.</div>` : ""}
+        ${info.already_in_client ? `<div class="notice warn">This torrent is already in qBittorrent. The files you tick are switched on in it; the others stay as they are.</div>` : ""}
         <div class="row" style="gap:8px"><input type="search" id="c-q" class="grow" placeholder="Filter the files (words in any order)…" autocomplete="off">
           <button class="btn small" id="c-all" title="Tick everything that matches the filter">Tick all matching</button><button class="btn small" id="c-none">Clear all ticks</button></div>
         <div id="c-list" style="overflow:auto;min-height:0;flex:1;border:1px solid var(--line);border-radius:8px"></div></div>
@@ -104,7 +104,7 @@ export async function render(root, ctx) {
     const sum = () => {
       const bytes = [...picked].reduce((a, i) => a + t.files[i].size, 0);
       m("#c-sum").textContent = picked.size ? `${picked.size.toLocaleString()} file${picked.size === 1 ? "" : "s"} ticked · ${fmtBytes(bytes)}` : "Tick the files you want";
-      m("#c-go").disabled = !picked.size || info.already_in_client;
+      m("#c-go").disabled = !picked.size;
       m("#c-go").textContent = picked.size ? `Download ${picked.size.toLocaleString()} file${picked.size === 1 ? "" : "s"} (${fmtBytes(bytes)})` : "Download the ticked files";
     };
     const draw = () => {

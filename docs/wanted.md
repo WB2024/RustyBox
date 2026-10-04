@@ -22,6 +22,10 @@ Open a game for its details: description and storyline, developer and publisher,
 
 API keys are stored on the server (`grabber.json`, owner-only) and are never sent to the browser. NZB links contain the indexer's key, so they never leave the server either, and keys are scrubbed from error messages.
 
+## Searching inside your own torrent files
+
+If you have folders of `.torrent` files (see `docs/torrents.md`) and qBittorrent is set up, the search window (Wanted → **Search…**, Discover → **Search releases…**) has a second tab, **My torrent files**. Pick one of your torrent folders (or all of them) and, if you like, type part of a torrent file's name to use just that one (for example `redump`). With no name typed, only torrents whose file name looks like Xbox 360 are read. RustyBox looks at the files listed *inside* those torrents, judges each file's name exactly like an indexer result (same region, name and size rules; a file that is a different game is left out, and "Halo 3 - ODST" for "Halo 3" is shown as rejected), and lists the matches best first. **Grab** switches on only that one file in qBittorrent (adding the torrent first if needed, and leaving any other files it already fetches alone), and from there it is followed, unpacked and imported like any other download. A file that was rejected needs a confirmation. Nothing is written until you press Grab.
+
 ## Torrents too
 
 Torrent indexers (Torznab, or Prowlarr's torrent indexers) sit alongside the Usenet ones: **Setup → Indexers** has a Usenet/Torrent choice, and the Prowlarr import brings in both kinds. Torrent results show their seeders; **a release nobody is sharing is rejected**, and a well-seeded one scores higher. Torrent indexers are searched only once qBittorrent is set up (the search says when some were left out). A grab fetches the `.torrent` itself (following a redirect to a magnet link if that is what the indexer does) and hands it to qBittorrent. Everything after that is the same as for Usenet: follow it in **Activity**, import it when it finishes. How torrents are set up, imported and cleaned up is in `docs/torrents.md`.

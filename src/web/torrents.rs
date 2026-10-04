@@ -9,7 +9,7 @@ use std::{
 
 use axum::{
     Json, Router,
-    extract::{Query, State},
+    extract::{Path as UrlPath, Query, State},
     routing::{get, post, put},
 };
 use serde::Deserialize;
@@ -20,6 +20,7 @@ use crate::{
     error::Error,
     grabber::{
         qbit::AddSource,
+        release,
         store::{self, NewGrab},
         torrent,
     },
@@ -33,6 +34,8 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/torrents/inspect", get(inspect))
         .route("/api/torrents/send", post(send))
         .route("/api/torrents/live", get(live))
+        .route("/api/wanted/{id}/search-files", post(search_files))
+        .route("/api/wanted/{id}/grab-file", post(grab_file))
 }
 
 async fn blocking<T: Send + 'static>(
@@ -230,36 +233,40 @@ struct SendReq {
     select: Option<Vec<usize>>,
 }
 
-/// Add the torrent to qBittorrent with only the chosen files switched on, and follow it like any
-/// other download (it is imported into the library when it finishes).
-async fn send(State(st): S, Json(r): Json<SendReq>) -> ApiResult<Json<Value>> {
-    let cfg = st.grabber.get();
-    if !cfg.qbit.configured() {
-        return Err(ApiError::bad(
-            "qBittorrent isn't set up yet. Add it under Wanted → Setup.",
-        ));
+/// What `add_chosen` did.
+struct Added {
+    hash: String,
+    title: String,
+    size: u64,
+    files: usize,
+    /// The torrent was already in qBittorrent: the chosen files were switched on in it.
+    existed: bool,
+}
+
+/// Add the torrent to qBittorrent with only the chosen files switched on. A torrent that is
+/// already there gets the chosen files switched on (the others are left as they are).
+fn add_chosen(
+    q: &crate::grabber::qbit::Qbit,
+    root: &Path,
+    file: &str,
+    select: Option<Vec<usize>>,
+) -> Result<Added, Error> {
+    let (bytes, t) = open_torrent(root, file)?;
+    let all: Vec<usize> = (0..t.files.len()).collect();
+    let mut wanted: Vec<usize> = select.unwrap_or_else(|| all.clone());
+    wanted.sort_unstable();
+    wanted.dedup();
+    if wanted.is_empty() {
+        return Err(Error::validation("Choose at least one file"));
     }
-    let root = dir_at(&st, r.dir)?;
-    let (file, select, q) = (r.file.clone(), r.select.clone(), cfg.qbit.clone());
-    let sent = blocking(move || {
-        let (bytes, t) = open_torrent(&root, &file)?;
-        let all: Vec<usize> = (0..t.files.len()).collect();
-        let mut wanted: Vec<usize> = select.unwrap_or_else(|| all.clone());
-        wanted.sort_unstable();
-        wanted.dedup();
-        if wanted.is_empty() {
-            return Err(Error::validation("Choose at least one file"));
-        }
-        if wanted.iter().any(|i| *i >= t.files.len()) {
-            return Err(Error::validation("A chosen file isn't in the torrent"));
-        }
-        if !q.info(std::slice::from_ref(&t.info_hash))?.is_empty() {
-            return Err(Error::coded(
-                409,
-                "ALREADY_IN_CLIENT",
-                "That torrent is already in qBittorrent. Change which of its files to fetch there.",
-            ));
-        }
+    if wanted.iter().any(|i| *i >= t.files.len()) {
+        return Err(Error::validation("A chosen file isn't in the torrent"));
+    }
+    let existed = !q.info(std::slice::from_ref(&t.info_hash))?.is_empty();
+    if existed {
+        q.set_priority(&t.info_hash, &wanted, 1)?;
+        q.start(&t.info_hash)?;
+    } else {
         let partial = wanted.len() < t.files.len();
         // Stopped first, so nothing is fetched before the unwanted files are switched off.
         q.add(
@@ -299,39 +306,384 @@ async fn send(State(st): S, Json(r): Json<SendReq>) -> ApiResult<Json<Value>> {
                 return Err(e);
             }
         }
-        let size: u64 = wanted.iter().map(|i| t.files[*i].size).sum();
-        let title = if wanted.len() == 1 {
-            let f = &t.files[wanted[0]].path;
-            f.rsplit('/').next().unwrap_or(f).to_string()
-        } else {
-            format!("{} ({} files)", t.name, wanted.len())
-        };
-        Ok((t.info_hash.clone(), title, size, wanted.len()))
+    }
+    let size: u64 = wanted.iter().map(|i| t.files[*i].size).sum();
+    let title = if wanted.len() == 1 {
+        let f = &t.files[wanted[0]].path;
+        f.rsplit('/').next().unwrap_or(f).to_string()
+    } else {
+        format!("{} ({} files)", t.name, wanted.len())
+    };
+    Ok(Added {
+        hash: t.info_hash.clone(),
+        title,
+        size,
+        files: wanted.len(),
+        existed,
     })
-    .await?;
-    let (hash, title, size, n) = sent;
-    let (h2, t2) = (hash.clone(), title.clone());
-    let id = st
-        .db
+}
+
+/// Record the download so it is followed and imported. If an open grab already follows this
+/// torrent (the same hash), that one is kept instead of making a second.
+async fn record(
+    st: &Arc<AppState>,
+    a: &Added,
+    wanted_id: i64,
+    score: i32,
+    indexer: &'static str,
+) -> Result<i64, Error> {
+    let (h, t, size) = (a.hash.clone(), a.title.clone(), a.size);
+    st.db
         .run(move |c| {
+            if let Some(g) = store::open_grabs(c)?
+                .into_iter()
+                .find(|g| g.sab_id.as_deref() == Some(h.as_str()))
+            {
+                return Ok(g.id);
+            }
             store::add_grab(
                 c,
                 &NewGrab {
-                    wanted_id: 0,
-                    guid: &h2,
-                    title: &t2,
-                    indexer: "Torrent file",
+                    wanted_id,
+                    guid: &h,
+                    title: &t,
+                    indexer,
                     size,
-                    score: 0,
-                    sab_id: &h2,
+                    score,
+                    sab_id: &h,
                     protocol: "torrent",
                 },
             )
         })
-        .await?;
+        .await
+}
+
+fn need_qbit(st: &AppState) -> Result<crate::grabber::qbit::Qbit, ApiError> {
+    let q = st.grabber.get().qbit;
+    if !q.configured() {
+        return Err(ApiError::bad(
+            "qBittorrent isn't set up yet. Add it under Wanted → Setup.",
+        ));
+    }
+    Ok(q)
+}
+
+/// Add the torrent to qBittorrent with only the chosen files switched on, and follow it like any
+/// other download (it is imported into the library when it finishes).
+async fn send(State(st): S, Json(r): Json<SendReq>) -> ApiResult<Json<Value>> {
+    let q = need_qbit(&st)?;
+    let root = dir_at(&st, r.dir)?;
+    let (file, select) = (r.file.clone(), r.select.clone());
+    let a = blocking(move || add_chosen(&q, &root, &file, select)).await?;
+    let id = record(&st, &a, 0, 0, "Torrent file").await?;
     Ok(Json(
-        json!({"grab": id, "title": title, "files": n, "hash": hash}),
+        json!({"grab": id, "title": a.title, "files": a.files, "hash": a.hash, "existed": a.existed}),
     ))
+}
+
+// ---- Searching inside the torrent files ----
+
+/// Parsed torrents, so a second search doesn't read every `.torrent` again. Keyed by path, and
+/// valid while the file's size and modified time are the same.
+type Cached = (u64, i64, Arc<torrent::Torrent>);
+static PARSED: std::sync::Mutex<Option<std::collections::HashMap<PathBuf, Cached>>> =
+    std::sync::Mutex::new(None);
+
+fn parsed(path: &Path, size: u64, mtime: i64) -> Option<Arc<torrent::Torrent>> {
+    {
+        let g = PARSED.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((s, m, t)) = g.as_ref().and_then(|c| c.get(path))
+            && *s == size
+            && *m == mtime
+        {
+            return Some(t.clone());
+        }
+    }
+    if size as usize > torrent::MAX_TORRENT_BYTES {
+        return None;
+    }
+    let t = Arc::new(torrent::parse(&std::fs::read(path).ok()?).ok()?);
+    let mut g = PARSED.lock().unwrap_or_else(|e| e.into_inner());
+    let c = g.get_or_insert_with(Default::default);
+    if c.len() >= 300 {
+        c.clear();
+    }
+    c.insert(path.to_path_buf(), (size, mtime, t.clone()));
+    Some(t)
+}
+
+/// A torrent that looks like it holds Xbox 360 games (used when no name filter is given).
+fn looks_like_360(rel: &str) -> bool {
+    let l = rel.to_lowercase();
+    let yes = l.contains("xbox 360") || l.contains("xbox360") || l.contains("x360");
+    let no = ["title update", "dlc", "addon", "add-on", "bitsavers"]
+        .iter()
+        .any(|w| l.contains(w));
+    yes && !no
+}
+
+/// The file name without its folders and extension: what a release would be called.
+fn stem(path: &str) -> &str {
+    let f = path.rsplit('/').next().unwrap_or(path);
+    f.rsplit_once('.').map(|(a, _)| a).unwrap_or(f)
+}
+
+#[derive(Deserialize)]
+struct SearchFilesReq {
+    /// Only this folder (its position in the settings); all of them when left out.
+    dir: Option<usize>,
+    /// Only torrent files whose name contains all these words.
+    #[serde(default)]
+    filter: String,
+}
+
+const MAX_HITS: usize = 300;
+
+/// Search the files listed inside the user's `.torrent` files for a wanted game.
+async fn search_files(
+    State(st): S,
+    UrlPath(id): UrlPath<i64>,
+    Json(r): Json<SearchFilesReq>,
+) -> ApiResult<Json<Value>> {
+    need_qbit(&st)?;
+    let cfg = st.grabber.get();
+    let (w, blocked) = st
+        .db
+        .run(move |c| Ok((store::get_wanted(c, id)?, store::blocked_keys(c)?)))
+        .await?;
+    let names = super::grabber::names_for(&w);
+    let mut dirs: Vec<(usize, PathBuf)> = cfg
+        .torrent_dirs
+        .iter()
+        .enumerate()
+        .map(|(i, d)| (i, PathBuf::from(d)))
+        .collect();
+    if let Some(d) = r.dir {
+        dirs.retain(|(i, _)| *i == d);
+        if dirs.is_empty() {
+            return Err(Error::not_found("That torrent folder isn't in the list any more").into());
+        }
+    }
+    if dirs.is_empty() {
+        return Err(ApiError::bad(
+            "No torrent folders are set up. Add one on the Torrents page.",
+        ));
+    }
+    let words: Vec<String> = r
+        .filter
+        .to_lowercase()
+        .split_whitespace()
+        .map(String::from)
+        .collect();
+    let profile = cfg.profile.clone();
+    let out = blocking(move || Ok(run_search(&dirs, &words, &names, &profile, &blocked))).await?;
+    Ok(Json(json!({
+        "wanted": w,
+        "torrents": out.torrents,
+        "files": out.files,
+        "capped": out.capped,
+        "notes": out.notes,
+        "results": out.hits,
+    })))
+}
+
+#[derive(Default)]
+struct SearchOut {
+    torrents: usize,
+    files: usize,
+    capped: bool,
+    notes: Vec<String>,
+    hits: Vec<Value>,
+}
+
+fn judge_file(
+    t: &torrent::Torrent,
+    f: &torrent::TorrentFile,
+    names: &[String],
+    profile: &release::Profile,
+    blocked: &std::collections::HashSet<String>,
+) -> release::Verdict {
+    let title = stem(&f.path);
+    let mut v = release::judge(
+        &release::Candidate {
+            title,
+            size: f.size,
+            categories: &[1050],
+            age_days: None,
+            grabs: None,
+            indexer_priority: 0,
+            seeders: None,
+        },
+        names,
+        profile,
+    );
+    if blocked.contains(&title.to_lowercase()) {
+        v.rejected
+            .push("On the blocklist (an earlier download of it failed)".into());
+    }
+    let _ = t;
+    v
+}
+
+fn run_search(
+    dirs: &[(usize, PathBuf)],
+    words: &[String],
+    names: &[String],
+    profile: &release::Profile,
+    blocked: &std::collections::HashSet<String>,
+) -> SearchOut {
+    let mut out = SearchOut::default();
+    // A file must contain the longest word of the wanted name, whatever the format, before it is
+    // worth judging (4,000 zips per torrent, so this keeps it quick).
+    let needles: Vec<String> = names
+        .iter()
+        .filter_map(|n| {
+            release::tokens(n)
+                .into_iter()
+                .max_by_key(|t| t.len())
+                .filter(|t| t.len() >= 2)
+        })
+        .collect();
+    let mut hits: Vec<(Value, (bool, i32, u64))> = Vec::new();
+    for (di, root) in dirs {
+        let found = list_torrents(root);
+        let total = found.len();
+        let chosen: Vec<&Found> = if words.is_empty() {
+            let xbox: Vec<&Found> = found.iter().filter(|f| looks_like_360(&f.rel)).collect();
+            if xbox.is_empty() {
+                found.iter().take(60).collect()
+            } else {
+                xbox
+            }
+        } else {
+            found
+                .iter()
+                .filter(|f| {
+                    let l = f.rel.to_lowercase();
+                    words.iter().all(|w| l.contains(w.as_str()))
+                })
+                .collect()
+        };
+        if chosen.len() < total && words.is_empty() && chosen.len() == 60 {
+            out.notes.push(format!(
+                "{}: no Xbox 360 torrents recognised by name, so the first 60 of {} were searched. Type part of a torrent file's name to narrow it.",
+                root.display(),
+                total
+            ));
+        }
+        for f in chosen {
+            let Ok(path) = crate::fsops::contained(root, &f.rel) else {
+                continue;
+            };
+            let Some(t) = parsed(&path, f.size, f.mtime) else {
+                continue;
+            };
+            out.torrents += 1;
+            out.files += t.files.len();
+            for file in &t.files {
+                let lower = file.path.to_lowercase();
+                if !needles.iter().any(|n| lower.contains(n.as_str())) {
+                    continue;
+                }
+                let v = judge_file(&t, file, names, profile, blocked);
+                // A file that is simply another game isn't listed; "Halo 3 - ODST" for "Halo 3" is.
+                if v.rejected
+                    .iter()
+                    .any(|x| x.contains("a different game: \""))
+                {
+                    continue;
+                }
+                let key = (v.rejected.is_empty(), v.score, file.size);
+                hits.push((
+                    json!({
+                        "dir": di,
+                        "folder": root.to_string_lossy(),
+                        "torrent_file": f.rel,
+                        "torrent_name": t.name,
+                        "info_hash": t.info_hash,
+                        "index": file.index,
+                        "path": file.path,
+                        "title": stem(&file.path),
+                        "size": file.size,
+                        "verdict": v,
+                    }),
+                    key,
+                ));
+            }
+        }
+    }
+    hits.sort_by_key(|h| std::cmp::Reverse(h.1));
+    if hits.len() > MAX_HITS {
+        out.capped = true;
+        hits.truncate(MAX_HITS);
+    }
+    out.hits = hits.into_iter().map(|h| h.0).collect();
+    out
+}
+
+#[derive(Deserialize)]
+struct GrabFileReq {
+    dir: usize,
+    torrent_file: String,
+    index: usize,
+    #[serde(default)]
+    force: bool,
+}
+
+/// Fetch one file of one of the user's torrents for a wanted game. The file is judged again here
+/// (nothing the browser says is trusted), then only it is switched on in qBittorrent.
+async fn grab_file(
+    State(st): S,
+    UrlPath(id): UrlPath<i64>,
+    Json(r): Json<GrabFileReq>,
+) -> ApiResult<Json<Value>> {
+    let q = need_qbit(&st)?;
+    let cfg = st.grabber.get();
+    let root = dir_at(&st, r.dir)?;
+    let (w, blocked, busy) = st
+        .db
+        .run(move |c| {
+            Ok((
+                store::get_wanted(c, id)?,
+                store::blocked_keys(c)?,
+                store::has_open_grab(c, id)?,
+            ))
+        })
+        .await?;
+    if busy {
+        return Err(ApiError::new(
+            axum::http::StatusCode::CONFLICT,
+            "ALREADY_DOWNLOADING",
+            format!("{} is already downloading", w.name),
+            true,
+        ));
+    }
+    let names = super::grabber::names_for(&w);
+    let (file, index, profile, force) = (
+        r.torrent_file.clone(),
+        r.index,
+        cfg.profile.clone(),
+        r.force,
+    );
+    let (a, score) = blocking(move || {
+        let (_, t) = open_torrent(&root, &file)?;
+        let f = t
+            .files
+            .get(index)
+            .ok_or_else(|| Error::validation("That file isn't in the torrent"))?;
+        let v = judge_file(&t, f, &names, &profile, &blocked);
+        if !v.rejected.is_empty() && !force {
+            return Err(Error::validation(format!(
+                "This file was rejected: {}",
+                v.rejected.join("; ")
+            )));
+        }
+        let a = add_chosen(&q, &root, &file, Some(vec![index]))?;
+        Ok((a, v.score))
+    })
+    .await?;
+    let gid = record(&st, &a, id, score, "Torrent file").await?;
+    Ok(Json(json!({"grab": gid, "title": a.title, "hash": a.hash})))
 }
 
 /// What qBittorrent is doing now, for a dashboard. Always answers 200: when qBittorrent isn't set

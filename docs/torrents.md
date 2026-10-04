@@ -53,6 +53,10 @@ With that, qBittorrent's *Default Save Path* can be `/data/storage/Download/Torr
 4. RustyBox adds the torrent to qBittorrent *stopped*, switches off every file you didn't tick, then starts it, so nothing you didn't choose is fetched. Ticking nothing is refused; ticking everything adds it normally. A torrent that is already in qBittorrent is not added a second time (change its files there).
 5. It appears under *Torrent downloads* and in **Wanted → Activity**, and is imported when it finishes.
 
+## Sending a torrent that is already in qBittorrent
+
+If the torrent is already there, sending it again (from the picker, or from a game's **My torrent files** search) switches on the files you picked and starts it; the files it already fetches are left as they are, and the download isn't tracked twice. Searching a game inside your torrent files is described in `docs/wanted.md`.
+
 ## Zipped games
 
 Redump's collection (and many others) is one **zip per game with the disc image inside**. When a finished download holds no game folders or ISOs but does hold zips with ISOs inside, RustyBox opens them first: a job called *Unpack …* writes the ISO files into a hidden folder (`.rustybox-unpack-<n>`) next to the download, then the usual import runs on those (and converts to GOD if the library is GOD). When the import is done the hidden folder is removed. The zips themselves are never changed, so the torrent keeps seeding. Not enough free space is refused before anything is written. Only `.iso` entries are taken out of a zip, and only by file name, so a hostile zip can't write anywhere else. 7z and RAR files aren't opened (a message says so).

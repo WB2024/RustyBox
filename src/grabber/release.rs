@@ -124,6 +124,14 @@ const LANGUAGES: &[&str] = &[
     "spa",
     "ita",
 ];
+/// Two-letter language codes, as in Redump names: `(En,Ja,Fr,De,Es,It,Pt,Zh,Ko)`. Short words like
+/// "no" and "it" start real game names, so a code only counts as one in a run of codes or right
+/// after a region, never as the first word.
+const LANGUAGE_CODES: &[&str] = &[
+    "en", "ja", "fr", "de", "es", "it", "pt", "zh", "ko", "nl", "sv", "no", "da", "fi", "pl", "ru",
+    "cs", "hu", "tr", "ar", "el", "he", "ca", "sk", "uk", "bg", "ro", "hr",
+];
+
 /// Tags that say something about the release, not the game.
 const TAGS: &[&str] = &[
     "proper",
@@ -198,7 +206,7 @@ const EDITION_WORDS: &[&str] = &[
     "s",
 ];
 
-fn tokens(s: &str) -> Vec<String> {
+pub fn tokens(s: &str) -> Vec<String> {
     norm(s)
         .split(' ')
         .filter(|t| !t.is_empty())
@@ -269,6 +277,11 @@ pub fn parse(title: &str) -> Parsed {
         ("update", "a title update"),
         ("tu", "a title update"),
         ("demo", "a demo"),
+        ("beta", "a beta"),
+        ("proto", "a prototype"),
+        ("prototype", "a prototype"),
+        ("sample", "a sample"),
+        ("preview", "a preview"),
         ("trial", "a trial"),
         ("dashboard", "a dashboard"),
         ("avatar", "an avatar item"),
@@ -316,16 +329,32 @@ pub fn parse(title: &str) -> Parsed {
             || t.starts_with("part") && t[4..].bytes().all(|b| b.is_ascii_digit())
             || OTHER_PLATFORMS.iter().any(|(k, _)| *k == t)
     };
+    // A language code is noise only next to other codes or a region (never as the first word).
+    let code_at = |i: usize| {
+        let t = all[i].as_str();
+        LANGUAGE_CODES.contains(&t)
+            && i > 0
+            && (LANGUAGE_CODES.contains(&all[i - 1].as_str())
+                || REGION_WORDS.iter().any(|(w, _)| *w == all[i - 1])
+                || all
+                    .get(i + 1)
+                    .is_some_and(|n| LANGUAGE_CODES.contains(&n.as_str())))
+    };
     let mut name_tokens: Vec<&String> = Vec::new();
-    for t in &all {
-        if noise(t) {
+    for (i, t) in all.iter().enumerate() {
+        if noise(t) || code_at(i) {
             break;
         }
         name_tokens.push(t);
     }
     // If the name came out empty (the tags came first), use everything that isn't noise.
     if name_tokens.is_empty() {
-        name_tokens = all.iter().filter(|t| !noise(t)).collect();
+        name_tokens = all
+            .iter()
+            .enumerate()
+            .filter(|(i, t)| !noise(t) && !code_at(*i))
+            .map(|(_, t)| t)
+            .collect();
     }
     let name = name_tokens
         .iter()
@@ -639,6 +668,19 @@ pub fn query_variants(names: &[String]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn language_codes_after_a_region_are_noise_but_game_words_are_not() {
+        let n = |t: &str| parse(t).name;
+        assert_eq!(
+            n("Halo 3 (USA, Europe) (En,Ja,Fr,De,Es,It,Pt,Zh,Ko)"),
+            "halo 3"
+        );
+        assert_eq!(n("Fable II (USA) (En)"), "fable ii");
+        assert_eq!(n("No More Heroes (USA)"), "no more heroes");
+        assert_eq!(n("It Came from Outer Space"), "it came from outer space");
+        assert!(parse("Halo 3 (Beta) (USA)").not_a_game.is_some());
+    }
 
     fn names(n: &str) -> Vec<String> {
         crate::igdb::rank::variants(n)

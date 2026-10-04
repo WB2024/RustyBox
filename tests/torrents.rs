@@ -549,12 +549,17 @@ async fn files_are_chosen_from_a_torrent_in_a_folder_then_fetched_unpacked_and_i
         assert_eq!(prios, vec![1, 0, 0]);
         assert!(!g.torrents[&hash].stopped);
     }
-    let (st, v) = call(app, "POST", "/api/torrents/send", Some(send(json!([0])))).await;
-    assert_eq!(
-        (st, v["error"].as_str()),
-        (StatusCode::CONFLICT, Some("ALREADY_IN_CLIENT")),
-        "{v}"
-    );
+    // Sending it again doesn't fail or make a second grab: the chosen file is switched on in the
+    // torrent that is already there.
+    let (st, v2) = call(app, "POST", "/api/torrents/send", Some(send(json!([0, 2])))).await;
+    assert_eq!(st, StatusCode::OK, "{v2}");
+    assert_eq!(v2["existed"], true);
+    assert_eq!(v2["grab"], v["grab"]);
+    {
+        let g = qb.lock().unwrap();
+        let prios: Vec<u32> = g.torrents[&hash].files.iter().map(|f| f.2).collect();
+        assert_eq!(prios, vec![1, 0, 1]);
+    }
 
     // It follows qBittorrent: waiting, then 40%, then done with the folder it made.
     let grab = |a: &Value| a["grabs"][0]["grab"].clone();
@@ -994,4 +999,161 @@ async fn the_live_view_shows_speeds_counts_and_the_busiest_torrents() {
         (Some(2_000_000), Some(500_000), Some(123_456_789))
     );
     assert!(!v.to_string().contains("adminpass"));
+}
+
+#[tokio::test]
+async fn a_wanted_game_is_searched_for_inside_the_torrent_files_and_one_file_is_grabbed() {
+    let (base, qb) = fake_qbit().await;
+    let e = env("filesearch");
+    let app = &e.app;
+    setup(&e, &base, json!({})).await;
+    let t = make_torrent(
+        "Redump",
+        &[
+            (
+                "Microsoft - Xbox 360/Halo 3 (USA) (En,Ja,Fr,De,Es,It,Pt,Zh,Ko).zip",
+                7_000_000_000,
+            ),
+            (
+                "Microsoft - Xbox 360/Halo 3 - ODST (USA) (En,Fr,Es).zip",
+                7_000_000_000,
+            ),
+            (
+                "Microsoft - Xbox 360/Halo 3 (Japan) (Ja).zip",
+                7_000_000_000,
+            ),
+            (
+                "Microsoft - Xbox 360/Halo Wars (USA) (En,Fr).zip",
+                7_000_000_000,
+            ),
+            (
+                "Microsoft - Xbox 360/Fable II (USA) (En).zip",
+                7_000_000_000,
+            ),
+        ],
+    );
+    fs::write(
+        e.root
+            .join("torrents/Redump - Microsoft - Xbox 360.torrent"),
+        &t,
+    )
+    .unwrap();
+    // Another torrent that is not Xbox 360 at all.
+    fs::write(
+        e.root.join("torrents/Sega Dreamcast.torrent"),
+        make_torrent("Dreamcast", &[("Halo 3 (USA).zip", 1000)]),
+    )
+    .unwrap();
+    let (st, _) = call(
+        app,
+        "PUT",
+        "/api/torrents/dirs",
+        Some(json!({"dirs": [e.root.join("torrents").to_string_lossy()]})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let (_, found) = call(app, "GET", "/api/wanted/lookup?q=Halo%203", None).await;
+    let cand = found["games"][0]["candidate"].clone();
+    let (st, w) = call(
+        app,
+        "POST",
+        "/api/wanted",
+        Some(json!({"igdb_id": cand["id"], "candidate": cand})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{w}");
+    let wid = w["id"].as_i64().unwrap();
+    let name = cand["name"].as_str().unwrap().to_string();
+
+    // With no filter only the Xbox 360 torrent is read (the Dreamcast one is not).
+    let (st, r) = call(
+        app,
+        "POST",
+        &format!("/api/wanted/{wid}/search-files"),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert_eq!(r["torrents"], 1, "{r}");
+    let res = r["results"].as_array().unwrap();
+    let title_of = |v: &Value| v["title"].as_str().unwrap().to_string();
+    let best = &res[0];
+    assert!(
+        title_of(best).starts_with("Halo 3 (USA)"),
+        "{name}: the right game comes first: {r}"
+    );
+    assert_eq!(
+        best["verdict"]["rejected"].as_array().unwrap().len(),
+        0,
+        "{r}"
+    );
+    assert!(res.iter().all(|x| !title_of(x).contains("Fable")), "{r}");
+    assert!(
+        res.iter().all(|x| !title_of(x).contains("Halo Wars")),
+        "{r}"
+    );
+    let odst = res.iter().find(|x| title_of(x).contains("ODST")).unwrap();
+    assert!(
+        !odst["verdict"]["rejected"].as_array().unwrap().is_empty(),
+        "a different game is rejected: {r}"
+    );
+
+    // A filter picks the torrent file by its name, even when it isn't an Xbox one.
+    let (_, r2) = call(
+        app,
+        "POST",
+        &format!("/api/wanted/{wid}/search-files"),
+        Some(json!({"dir": 0, "filter": "dreamcast"})),
+    )
+    .await;
+    assert_eq!(r2["torrents"], 1);
+    let (st, _) = call(
+        app,
+        "POST",
+        &format!("/api/wanted/{wid}/search-files"),
+        Some(json!({"dir": 5})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+
+    // A rejected file is refused unless forced; the right one is sent alone.
+    let grab = |index: &Value, force: bool| json!({"dir": 0, "torrent_file": "Redump - Microsoft - Xbox 360.torrent", "index": index, "force": force});
+    let (st, v) = call(
+        app,
+        "POST",
+        &format!("/api/wanted/{wid}/grab-file"),
+        Some(grab(&odst["index"], false)),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
+    assert!(qb.lock().unwrap().torrents.is_empty());
+    let (st, v) = call(
+        app,
+        "POST",
+        &format!("/api/wanted/{wid}/grab-file"),
+        Some(grab(&best["index"], false)),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    let hash = torrent::parse(&t).unwrap().info_hash;
+    {
+        let g = qb.lock().unwrap();
+        let on: Vec<usize> = g.torrents[&hash]
+            .files
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.2 > 0)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(on, vec![best["index"].as_u64().unwrap() as usize]);
+    }
+    // The game is downloading now: a second grab is refused.
+    let (st, v) = call(
+        app,
+        "POST",
+        &format!("/api/wanted/{wid}/grab-file"),
+        Some(grab(&best["index"], false)),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CONFLICT, "{v}");
 }
