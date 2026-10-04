@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RustyBox</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='5' width='26' height='22' rx='4' fill='%23e8743b'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23111'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%23e8743b'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/assets/css/app.css">
+<link rel="modulepreload" href="/assets/js/util.js">
+<link rel="modulepreload" href="/assets/js/jobs.js">
+<link rel="modulepreload" href="/assets/js/modal.js">
+<script>try{var t=localStorage.getItem("rb-theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<a class="skip" href="#page">Skip to content</a>
+<header id="topbar">
+  <button class="btn small" id="menu" aria-label="Menu" aria-expanded="false" aria-controls="side">☰</button>
+  <b class="grow">RustyBox</b>
+  <button class="btn small" id="qf-open-m" aria-label="Quick find">🔍</button>
+  <a class="badge running hidden" id="tb-jobs" href="#jobs"></a>
+</header>
+<div id="scrim"></div>
+<div id="app">
+  <aside id="side">
+    <div class="brand">
+      <svg viewBox="0 0 32 32"><rect x="3" y="5" width="26" height="22" rx="4" fill="#e8743b"/><circle cx="16" cy="16" r="9" fill="none" stroke="#fff" stroke-opacity=".25"/><circle cx="16" cy="16" r="6" fill="#111"/><circle cx="16" cy="16" r="2.5" fill="#e8743b"/></svg>
+      RustyBox
+    </div>
+    <button class="qf-btn" id="qf-open" title="Search pages, libraries and games (Ctrl+K or /)"><span>🔍 Quick find</span><kbd>Ctrl K</kbd></button>
+    <nav id="nav" aria-label="Main"></nav>
+    <div class="side-foot"><div><span id="ver"></span> <span id="mockflag" class="badge accent hidden">MOCK</span></div><div class="row" style="gap:6px;margin-top:8px"><button class="btn small" id="theme" title="Switch between dark and light">🌓 Theme</button><button class="btn small hidden" id="logout">Log out</button></div></div>
+  </aside>
+  <main id="main">
+    <div id="banner" class="hidden">
+      <b id="bn-title"></b>
+      <div class="bar"><i id="bn-bar"></i></div>
+      <span class="muted grow" id="bn-step"></span>
+      <span class="muted">View →</span>
+    </div>
+    <div id="page"></div>
+  </main>
+</div>
+<div id="toasts" role="status" aria-live="polite"></div>
+<script type="module" src="/assets/js/app.js"></script>
+</body>
+</html>

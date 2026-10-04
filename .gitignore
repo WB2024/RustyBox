@@ -1,0 +1,45 @@
+# Build output
+/target
+
+# Runtime data and anything sensitive: settings, API keys, tokens, databases, passwords
+/config
+.env
+.env.*
+!.env.example
+*.db
+*.db-wal
+*.db-shm
+*.db.bak*
+grabber.json
+settings.json
+consoles.json
+WEBUI_PASSWORD*
+*.pem
+*.key
+*.part
+
+# AI assistant files and tool scratch (instructions, memory, browser automation output)
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+.playwright-mcp/
+.mcp.json
+AGENTS.md
+GEMINI.md
+.cursor/
+.cursorrules
+.windsurf/
+.aider*
+.codex/
+.github/copilot-instructions.md
+.continue/
+.cline/
+.roo/
+*.jsonl
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

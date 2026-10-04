@@ -1,0 +1,11 @@
+target
+.git
+config
+.playwright-mcp
+docs
+Images
+README.md
+LICENSE
+CLAUDE.md
+.env
+.env.*

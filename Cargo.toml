@@ -1,0 +1,44 @@
+[package]
+name = "rustybox"
+version = "0.13.4"
+edition = "2024"
+description = "Self-hosted manager for modded Xbox 360s: libraries, GOD conversion, console transfers, USB tools"
+license = "MIT"
+
+[lib]
+name = "rustybox"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rustybox"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "sync", "io-util", "time", "fs", "signal"] }
+tokio-util = "0.7"
+futures-util = "0.3"
+rust-embed = "8"
+argon2 = { version = "0.5", features = ["std"] }
+libc = "0.2"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7.1", features = ["fs"] }
+iso2god = { git = "https://github.com/iliazeus/iso2god-rs", tag = "v1.8.1", version = "1.8.0" }
+xdvdfs = { version = "0.8.3", default-features = false, features = ["std", "read", "write", "sync"] }
+rayon = "1.12.0"
+ureq = { version = "2", features = ["json"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+quick-xml = "0.37"
+sha1 = "0.10"
+
+[dev-dependencies]
+http-body-util = "0.1"
+
+[features]
+hardware_tests = []

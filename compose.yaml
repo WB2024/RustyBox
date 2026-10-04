@@ -1,0 +1,32 @@
+# RustyBox stack for Dockge (or any Compose host).
+services:
+  rustybox:
+    image: wb20244/rustybox:latest
+    container_name: rustybox
+    restart: unless-stopped
+    init: true                          # reaps the helper programs it starts (abgx360, mkfs) and passes on stop signals
+    stop_grace_period: 15s
+    ports:
+      - "8088:8080"                     # web UI → http://<server>:8088
+    volumes:
+      - ./config:/config                # settings and the index
+      # Library storage. RustyBox only sees these container paths; mount host disks and
+      # network shares (mounted on the host first) here, then add them as library paths in the UI.
+      - /path/to/your/games:/data/games     # change the left side to your own folder
+      # - /mnt/nas:/data/nas                # more disks or shares: one line each
+    environment:
+      RUSTYBOX_PUID: "1000"             # owner of everything RustyBox creates
+      RUSTYBOX_PGID: "100"
+      RUSTYBOX_UMASK: "002"
+      # RUSTYBOX_AUTH_USER: me          # optional login (or set it in Settings → Security)
+      # RUSTYBOX_AUTH_PASSWORD: change-me
+      # IGDB_CLIENT_ID: ""             # cover art and game details: or set them in Settings (docs/igdb.md)
+      # IGDB_CLIENT_SECRET: ""
+      # RUSTYBOX_MOCK: "true"           # simulate everything, to try the UI without hardware
+
+      # USB tools (Bad Avatar sticks, formatting, backups) need the host's USB devices. Either run
+      # the container privileged, or pass the stick through (and list it with: lsblk):
+      #   privileged: true
+      # or, under "devices:", for a stick that shows up as /dev/sdb:
+      #   - /dev/sdb:/dev/sdb
+      # Mounted-stick folders can be added to the volumes above to import from them.
