@@ -98,6 +98,34 @@ impl TorrentInfo {
     }
 }
 
+/// A torrent as a dashboard shows it.
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
+pub struct Live {
+    pub hash: String,
+    pub name: String,
+    pub state: String,
+    pub percent: f32,
+    pub size: u64,
+    /// Bytes per second.
+    pub down: u64,
+    pub up: u64,
+    /// Seconds left, if qBittorrent can say.
+    pub eta: Option<u64>,
+    pub ratio: f32,
+    pub category: String,
+    pub added: i64,
+}
+
+/// What the whole client is doing.
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
+pub struct Overview {
+    pub version: String,
+    pub down: u64,
+    pub up: u64,
+    pub free: Option<u64>,
+    pub torrents: Vec<Live>,
+}
+
 /// One file of a torrent as qBittorrent lists it.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct FileInfo {
@@ -427,6 +455,49 @@ impl Qbit {
                 .post("torrents/resume", &[("hashes", hash)])
                 .map(|_| ()),
         }
+    }
+
+    /// Speeds, free space and every torrent, newest first.
+    pub fn overview(&self) -> Result<Overview, Error> {
+        let version = self.version()?;
+        let t = self.json("transfer/info", &[])?;
+        // The main data call also carries the free space of the download folder.
+        let free = self
+            .json("sync/maindata", &[("rid", "0")])
+            .ok()
+            .and_then(|v| v["server_state"]["free_space_on_disk"].as_u64());
+        let list = self.json(
+            "torrents/info",
+            &[("sort", "added_on"), ("reverse", "true")],
+        )?;
+        let torrents = list
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|t| Live {
+                        hash: t["hash"].as_str().unwrap_or("").to_lowercase(),
+                        name: t["name"].as_str().unwrap_or("").into(),
+                        state: t["state"].as_str().unwrap_or("").into(),
+                        percent: (t["progress"].as_f64().unwrap_or(0.0) * 100.0) as f32,
+                        size: t["size"].as_u64().unwrap_or(0),
+                        down: t["dlspeed"].as_u64().unwrap_or(0),
+                        up: t["upspeed"].as_u64().unwrap_or(0),
+                        // qBittorrent says 8640000 for "never".
+                        eta: t["eta"].as_u64().filter(|e| *e < 8_640_000),
+                        ratio: t["ratio"].as_f64().unwrap_or(0.0) as f32,
+                        category: t["category"].as_str().unwrap_or("").into(),
+                        added: t["added_on"].as_i64().unwrap_or(0),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(Overview {
+            version,
+            down: t["dl_info_speed"].as_u64().unwrap_or(0),
+            up: t["up_info_speed"].as_u64().unwrap_or(0),
+            free,
+            torrents,
+        })
     }
 
     /// Remove a torrent, and with `files` the downloaded data too.

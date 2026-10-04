@@ -259,13 +259,21 @@ async fn fake_qbit() -> (String, Shared) {
         .route("/api/v2/torrents/info", get(move |State(q): State<Shared>, headers: HeaderMap, Query(f): Query<HashMap<String, String>>| async move {
             if !authed(&headers) { return forbidden(); }
             let g = q.lock().unwrap();
-            let want: Vec<&str> = f.get("hashes").map(|h| h.split('|').collect()).unwrap_or_default();
-            let list: Vec<Value> = g.torrents.iter().filter(|(h, _)| want.contains(&h.as_str())).map(|(h, t)| {
+            let want: Option<Vec<&str>> = f.get("hashes").map(|h| h.split('|').collect());
+            let list: Vec<Value> = g.torrents.iter().filter(|(h, _)| want.as_ref().is_none_or(|w| w.contains(&h.as_str()))).map(|(h, t)| {
                 json!({"hash": h, "name": t.name, "state": t.state, "progress": t.progress,
                        "amount_left": if t.progress >= 1.0 { 0 } else { 1000 }, "content_path": t.content_path,
                        "save_path": "/downloads", "ratio": 0.0})
             }).collect();
             axum::Json(Value::Array(list)).into_response()
+        }))
+        .route("/api/v2/transfer/info", get(move |headers: HeaderMap| async move {
+            if !authed(&headers) { return forbidden(); }
+            axum::Json(json!({"dl_info_speed": 2_000_000, "up_info_speed": 500_000, "connection_status": "connected"})).into_response()
+        }))
+        .route("/api/v2/sync/maindata", get(move |headers: HeaderMap| async move {
+            if !authed(&headers) { return forbidden(); }
+            axum::Json(json!({"rid": 1, "server_state": {"free_space_on_disk": 123_456_789_u64}})).into_response()
         }))
         .route("/api/v2/torrents/files", get(move |State(q): State<Shared>, headers: HeaderMap, Query(f): Query<HashMap<String, String>>| async move {
             if !authed(&headers) { return forbidden(); }
@@ -886,4 +894,104 @@ async fn a_one_file_torrent_is_imported_from_a_folder_of_its_own_and_keeps_seedi
         qb.lock().unwrap().torrents.contains_key(&hash),
         "left in qBittorrent"
     );
+}
+
+#[tokio::test]
+async fn a_long_list_of_torrent_files_can_be_shown_past_five_hundred_and_the_summary_answers() {
+    let e = env("many");
+    let dir = e.root.join("torrents");
+    for i in 0..620 {
+        fs::write(
+            dir.join(format!("Collection {i:04}.torrent")),
+            make_single(&format!("g{i}.iso"), 10),
+        )
+        .unwrap();
+    }
+    let (st, _) = call(
+        &e.app,
+        "PUT",
+        "/api/torrents/dirs",
+        Some(json!({"dirs": [dir.to_string_lossy()]})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let (_, f) = call(&e.app, "GET", "/api/torrents/files?dir=0&limit=1000", None).await;
+    assert_eq!(
+        f["files"].as_array().unwrap().len(),
+        620,
+        "not cut off at 500"
+    );
+    assert_eq!(f["total"], 620);
+    // A page further on.
+    let (_, f) = call(
+        &e.app,
+        "GET",
+        "/api/torrents/files?dir=0&limit=200&offset=600",
+        None,
+    )
+    .await;
+    assert_eq!(f["files"].as_array().unwrap().len(), 20);
+
+    // qBittorrent not set up: the live view says so (and still answers).
+    let (st, v) = call(&e.app, "GET", "/api/torrents/live", None).await;
+    assert_eq!(
+        (st, v["configured"].as_bool(), v["online"].as_bool()),
+        (StatusCode::OK, Some(false), Some(false))
+    );
+    // The summary for dashboards.
+    let (st, v) = call(&e.app, "GET", "/api/summary", None).await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    assert!(
+        v["games"].is_number()
+            && v["libraries"].is_number()
+            && v["jobs"]["running"].is_array()
+            && v["latest"].is_array(),
+        "{v}"
+    );
+    assert!(v["version"].is_string());
+}
+
+#[tokio::test]
+async fn the_live_view_shows_speeds_counts_and_the_busiest_torrents() {
+    let (base, qb) = fake_qbit().await;
+    let e = env("live");
+    setup(&e, &base, json!({})).await;
+    {
+        let mut g = qb.lock().unwrap();
+        for (h, state, p) in [
+            ("a", "downloading", 0.5),
+            ("b", "stalledUP", 1.0),
+            ("c", "error", 0.2),
+            ("d", "pausedDL", 0.1),
+        ] {
+            g.torrents.insert(
+                h.repeat(40),
+                Tor {
+                    name: format!("T {h}"),
+                    state: state.into(),
+                    progress: p,
+                    ..Default::default()
+                },
+            );
+        }
+    }
+    let (st, v) = call(&e.app, "GET", "/api/torrents/live", None).await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    assert_eq!(v["online"], true, "{v}");
+    assert_eq!(
+        (
+            v["counts"]["total"].as_u64(),
+            v["counts"]["downloading"].as_u64(),
+            v["counts"]["seeding"].as_u64(),
+            v["counts"]["errored"].as_u64(),
+            v["counts"]["paused"].as_u64()
+        ),
+        (Some(4), Some(1), Some(1), Some(1), Some(1))
+    );
+    assert_eq!(v["torrents"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        (v["down"].as_u64(), v["up"].as_u64(), v["free"].as_u64()),
+        (Some(2_000_000), Some(500_000), Some(123_456_789))
+    );
+    assert!(!v.to_string().contains("adminpass"));
 }

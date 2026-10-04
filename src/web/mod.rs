@@ -15,6 +15,7 @@ mod igdb;
 mod import;
 mod libraries;
 mod settings_api;
+mod summary;
 mod torrents;
 mod transfer;
 mod updates;
@@ -249,6 +250,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(extras::routes())
         .merge(grabber::routes())
         .merge(torrents::routes())
+        .merge(summary::routes())
         .merge(discover::routes())
         .route("/api/jobs", get(list_jobs))
         .route("/api/jobs/demo", post(start_demo))

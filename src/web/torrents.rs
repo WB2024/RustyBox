@@ -32,6 +32,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/torrents/files", get(files))
         .route("/api/torrents/inspect", get(inspect))
         .route("/api/torrents/send", post(send))
+        .route("/api/torrents/live", get(live))
 }
 
 async fn blocking<T: Send + 'static>(
@@ -188,7 +189,7 @@ async fn files(State(st): S, Query(q): Query<FilesQuery>) -> ApiResult<Json<Valu
             words.iter().all(|w| l.contains(w))
         })
         .collect();
-    let (offset, limit) = (q.offset.unwrap_or(0), q.limit.unwrap_or(200).clamp(1, 500));
+    let (offset, limit) = (q.offset.unwrap_or(0), q.limit.unwrap_or(200).clamp(1, 5000));
     Ok(Json(json!({
         "total": hits.len(),
         "all": all.len(),
@@ -331,4 +332,56 @@ async fn send(State(st): S, Json(r): Json<SendReq>) -> ApiResult<Json<Value>> {
     Ok(Json(
         json!({"grab": id, "title": title, "files": n, "hash": hash}),
     ))
+}
+
+/// What qBittorrent is doing now, for a dashboard. Always answers 200: when qBittorrent isn't set
+/// up or can't be reached, `online` is false and `message` says why.
+async fn live(State(st): S) -> Json<Value> {
+    let q = st.grabber.get().qbit;
+    if !q.configured() {
+        return Json(
+            json!({"configured": false, "online": false, "message": "qBittorrent isn't set up"}),
+        );
+    }
+    match blocking(move || q.overview()).await {
+        Err(e) => Json(json!({"configured": true, "online": false, "message": e.to_string()})),
+        Ok(o) => {
+            let count =
+                |f: &dyn Fn(&str) -> bool| o.torrents.iter().filter(|t| f(&t.state)).count();
+            let downloading = count(&|s| {
+                matches!(
+                    s,
+                    "downloading"
+                        | "forcedDL"
+                        | "metaDL"
+                        | "forcedMetaDL"
+                        | "stalledDL"
+                        | "queuedDL"
+                        | "checkingDL"
+                )
+            });
+            let seeding = count(&|s| {
+                matches!(
+                    s,
+                    "uploading" | "forcedUP" | "stalledUP" | "queuedUP" | "checkingUP"
+                )
+            });
+            let errored = count(&|s| matches!(s, "error" | "missingFiles"));
+            let paused = count(&|s| s.starts_with("paused") || s.starts_with("stopped"));
+            // The ones worth showing: anything moving first, then the newest.
+            let mut shown: Vec<_> = o.torrents.iter().collect();
+            shown.sort_by_key(|t| {
+                (
+                    std::cmp::Reverse(t.down + t.up > 0),
+                    std::cmp::Reverse(t.added),
+                )
+            });
+            Json(json!({
+                "configured": true, "online": true, "version": o.version,
+                "down": o.down, "up": o.up, "free": o.free,
+                "counts": {"total": o.torrents.len(), "downloading": downloading, "seeding": seeding, "paused": paused, "errored": errored},
+                "torrents": shown.into_iter().take(8).collect::<Vec<_>>(),
+            }))
+        }
+    }
 }
