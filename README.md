@@ -53,6 +53,7 @@ No ads. No subscriptions. No tracking. No paywalled "pro" tier. Ever.
 | 🕹️ **Straight to the console** | Browse, scan, compare and send games to your Xbox 360 over FTP (Aurora). Replace a game without losing its saves. |
 | 💽 **Manage the Xbox's hard drive** | Compare the drive with your library, mirror it, tidy it, and find add-ons and updates that are in the wrong folder, without ever unplugging it from its PC. |
 | 🧭 **Discover and download** | Browse every Xbox 360 game on IGDB, see similar games, then grab one from **Usenet or torrents**. It is downloaded, converted to GOD, put in your library, copied to the drive and sent to the console, automatically if you want. |
+| 💽 **Xbox drive from your browser** | Plug the Xbox's hard drive into any computer, open RustyBox in Chrome, Edge or Brave and pick the folder. No program to install, no token to type. |
 | 🧲 **Torrents, your way** | Search torrent indexers like you do Usenet, or open a `.torrent` file, **tick just the files you want** out of thousands, and qBittorrent downloads only those. From a wanted game, **search inside your torrent files** (pick the folder, or one torrent) and grab just that game. |
 | 🧩 **Mods, trainers and updates** | Install mods, trainers and homebrew, and find and install title updates, all with a preview of exactly where each file goes. |
 | 🔌 **USB tools** | Build a Bad Avatar stick, format and back up USB drives. Only removable sticks are ever offered. |
@@ -114,6 +115,7 @@ services:
     init: true
     ports:
       - "8088:8080"                        # the web interface
+      - "8443:8443"                        # the same, over HTTPS (needed to share a drive from the browser)
     volumes:
       - ./config:/config                   # settings and the index
       - /path/to/your/games:/data/games    # change the left side to your own folder

@@ -51,6 +51,15 @@ pub fn clean_url(raw: &str) -> Result<String, Error> {
                 "The address must start with http:// (for example http://192.168.1.48:8099)",
             )
         })?;
+    // A drive shared from a browser is reached through this server: `/browser-agent/<id>`.
+    if let Some((host, path)) = rest.split_once("/browser-agent/")
+        && !host.is_empty()
+        && !host.contains(['/', ' ', '?', '#'])
+        && !path.is_empty()
+        && path.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return Ok(u.to_string());
+    }
     if rest.is_empty() || rest.contains(['/', ' ', '?', '#']) {
         return Err(Error::validation(
             "Use just the address and port, like http://192.168.1.48:8099",
@@ -162,12 +171,25 @@ impl Remote {
         Self::json(self.req("GET", "stat").query("path", &self.at(rel)).call())
     }
 
+    /// Is this drive shared from a web browser (which can't scan on its own side)?
+    pub fn is_browser(&self) -> bool {
+        self.base.contains("/browser-agent/")
+    }
+
     /// Scan the drive on the agent's side. `scanner` is `iso`, `god` or `files`.
     pub fn scan(
         &self,
         scanner: &str,
         existing: &HashMap<String, Existing>,
     ) -> Result<Vec<Found>, Error> {
+        if self.is_browser() {
+            let sc = match scanner {
+                "iso" => crate::library::scan::Scanner::Iso,
+                "god" => crate::library::scan::Scanner::God,
+                _ => crate::library::scan::Scanner::Files,
+            };
+            return crate::library::scan_remote::scan(self, sc, existing);
+        }
         #[derive(Deserialize)]
         struct Out {
             items: Vec<Found>,

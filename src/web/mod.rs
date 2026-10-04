@@ -5,6 +5,7 @@
 
 mod assets;
 mod auth;
+mod browser_agent;
 mod console;
 mod content;
 mod convert;
@@ -16,6 +17,7 @@ mod import;
 mod libraries;
 mod settings_api;
 mod summary;
+pub mod tls;
 mod torrents;
 mod transfer;
 mod updates;
@@ -78,6 +80,10 @@ pub struct AppState {
     pub igdb: crate::igdb::Client,
     /// Files with an upload in progress, so two requests never write the same one.
     pub uploading: crate::fsops::Locks,
+    /// Drives shared from a browser (see `browser_agent`).
+    pub relay: browser_agent::Relay,
+    /// The port this server answers on, so a browser-shared drive can be called through it.
+    pub listen_port: std::sync::atomic::AtomicU16,
 }
 
 pub type S = State<Arc<AppState>>;
@@ -187,6 +193,7 @@ pub fn build_state(mut cfg: Config) -> Result<Arc<AppState>, Error> {
     let consoles = crate::console::Store::load(&cfg.config_dir);
     let content = crate::content::Db::new(&cfg.config_dir, cfg.mock);
     let grabber = crate::grabber::config::Store::load(&cfg.config_dir);
+    let relay_dir = cfg.config_dir.clone();
     let jobs = Jobs::default();
     jobs.attach(db.clone())?;
     let state = Arc::new(AppState {
@@ -201,6 +208,8 @@ pub fn build_state(mut cfg: Config) -> Result<Arc<AppState>, Error> {
         grab_cache: Default::default(),
         igdb,
         uploading: Default::default(),
+        relay: browser_agent::Relay::load(&relay_dir),
+        listen_port: Default::default(),
     });
     if state.cfg.mock {
         console::start_mock(&state)?;
@@ -250,6 +259,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(extras::routes())
         .merge(grabber::routes())
         .merge(torrents::routes())
+        .merge(browser_agent::routes())
         .merge(summary::routes())
         .merge(discover::routes())
         .route("/api/jobs", get(list_jobs))
@@ -280,9 +290,28 @@ async fn safe_headers(req: axum::extract::Request, next: axum::middleware::Next)
 }
 
 pub async fn serve(cfg: Config, bind: SocketAddr) -> Result<(), Error> {
+    serve_with_tls(cfg, bind, None).await
+}
+
+/// Like `serve`, and also answers over HTTPS on `tls` (a self-signed certificate is made).
+pub async fn serve_with_tls(
+    cfg: Config,
+    bind: SocketAddr,
+    tls: Option<SocketAddr>,
+) -> Result<(), Error> {
     let state = build_state(cfg)?;
+    state
+        .listen_port
+        .store(bind.port(), std::sync::atomic::Ordering::Relaxed);
     spawn_background(state.clone());
-    let app = router(state);
+    let app = router(state.clone());
+    if let Some(t) = tls {
+        tokio::spawn(self::tls::serve(
+            state.cfg.config_dir.clone(),
+            t,
+            app.clone(),
+        ));
+    }
     let listener = tokio::net::TcpListener::bind(bind)
         .await
         .map_err(|e| Error::backend(format!("Cannot bind {bind}: {e}")))?;

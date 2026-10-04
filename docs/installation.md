@@ -22,6 +22,7 @@ services:
     init: true
     ports:
       - "8088:8080"                 # the web interface: http://<server>:8088
+      - "8443:8443"                 # the same over HTTPS: https://<server>:8443 (a certificate RustyBox makes itself)
     volumes:
       - ./config:/config            # settings, the index, cached covers
       - /path/to/your/games:/data/games     # change the left side; add one line per disk

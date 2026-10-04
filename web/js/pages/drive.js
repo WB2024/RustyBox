@@ -3,6 +3,7 @@ import { openSend } from "../import.js";
 import { compareView } from "../compare-view.js";
 import { tidyDialog } from "../tidy.js";
 import { misplacedDialog } from "../misplaced.js";
+import * as browserDrive from "../browser-agent.js";
 
 export const title = "Xbox drive";
 
@@ -31,16 +32,20 @@ export async function render(root, ctx) {
 
   async function draw() {
     const h = drive.path.health;
+    const isBrowser = (drive.path.remote_url || "").includes("/browser-agent/");
+    const mine = isBrowser && browserDrive.drives().find((d) => d.state === "needs-permission");
     const used = h.total ? Math.round(((h.total - h.free) / h.total) * 100) : 0;
     root.innerHTML = `
       <div class="page-head row"><div class="grow"><h1>💽 ${esc(drive.lib.name)}</h1>
         <div class="muted">${h.online ? `<span class="badge ok">online</span>` : `<span class="badge err">offline</span>`} ${h.remote_name ? "attached to " + esc(h.remote_name) + " · " : ""}${esc(h.fs_type || "")}${h.max_file ? " · single files must be under 4 GB" : ""}${h.share_read_only ? " · shared read-only" : ""}</div></div>
         ${drives.length > 1 ? `<select id="d-pick">${drives.map((d) => `<option value="${d.lib.id}" ${d === drive ? "selected" : ""}>${esc(d.lib.name)}</option>`).join("")}</select>` : ""}
         <button class="btn primary" id="d-add" ${drive.path.writable && h.online ? "" : "disabled"}>Add games…</button><button class="btn" id="d-tidy" ${drive.path.writable && h.online ? "" : "disabled"}>Tidy folders…</button><button class="btn" id="d-fix" ${drive.path.writable && h.online ? "" : "disabled"}>Fix misplaced items…</button><button class="btn" id="d-scan">Rescan the drive</button><a class="btn" href="#library/${drive.lib.id}">Open as a library</a></div>
-      ${h.online ? `<div class="card"><div class="row"><b>${fmtBytes(h.free)} free</b><span class="muted">of ${fmtBytes(h.total)}</span><div class="grow"></div><span class="muted">${used}% used</span></div>
-          <div class="bar" style="margin-top:8px"><i style="width:${used}%"></i></div>
+      ${h.online ? `<div class="card">${h.total >= 2 ** 49 ? `<div class="row"><b>Free space isn't known</b><span class="muted">a browser can't see how much room the drive has; a copy stops with a message if it fills up</span></div>` : `<div class="row"><b>${fmtBytes(h.free)} free</b><span class="muted">of ${fmtBytes(h.total)}</span><div class="grow"></div><span class="muted">${used}% used</span></div>
+          <div class="bar" style="margin-top:8px"><i style="width:${used}%"></i></div>`}
           ${drive.path.writable ? "" : `<div class="notice warn" style="margin-top:10px">This drive is read-only here${h.share_read_only ? " (the agent was started with --read-only)" : ": turn on Writable for its folder on the library page"}, so games can't be copied to it.</div>`}</div>`
-        : `<div class="notice err">The drive isn't reachable: ${esc(h.problem || "")}<br>Is it plugged in, and is the agent running on that computer? Its games are kept in the list below the last time it was scanned.</div>`}
+        : isBrowser
+          ? `<div class="notice err">The drive isn't reachable: ${esc(h.problem || "")}<br>It is shared from a web browser: open RustyBox in that browser (on the computer the drive is plugged into) and keep a RustyBox page open. ${mine ? `<button class="btn small" id="d-reconnect">Reconnect</button>` : ""} Its games are kept in the list below the last time it was scanned.</div>`
+          : `<div class="notice err">The drive isn't reachable: ${esc(h.problem || "")}<br>Is it plugged in, and is the agent running on that computer? Its games are kept in the list below the last time it was scanned.</div>`}
       <div class="card"><div class="row"><label class="field grow" style="max-width:420px">Compare with<select id="d-main">${mains.map((l) => `<option value="${l.id}" ${l === main ? "selected" : ""}>${esc(l.name)} (${l.items} ${l.kind.toUpperCase()})</option>`).join("")}</select></label>
 </div></div>
       <details class="card" id="d-folders" ${drive.remote.length > 1 ? "open" : ""}><summary><b>Folders on this drive</b> <span class="muted">(${drive.remote.length}) · what each folder on the drive holds</span></summary>
@@ -73,6 +78,7 @@ export async function render(root, ctx) {
     }));
     $("#d-tidy").onclick = () => tidyDialog(drive.lib, ctx);
     $("#d-fix").onclick = () => misplacedDialog(drive.lib, ctx);
+    if ($("#d-reconnect")) $("#d-reconnect").onclick = async () => { try { await browserDrive.reconnect(mine.id); toast("Reconnected", "ok"); location.reload(); } catch (e) { toast(e.message, "err"); } };
     $("#d-scan").onclick = async () => { try { const { job } = await api(`/api/libraries/${drive.lib.id}/scan`, { method: "POST" }); ctx.openJob(job); } catch (e) { toast(e.message, "err"); } };
     if (main) compare(); else $("#d-out").innerHTML = `<div class="notice">Add a GOD or ISO library of your own first, then you can compare it with the drive.</div>`;
   }
@@ -145,7 +151,8 @@ function setup(root, ctx) {
   const ufw = "sudo ufw allow from 192.168.1.0/24 to any port 8099 proto tcp";
   root.innerHTML = `
     <div class="page-head"><h1>💽 Xbox drive</h1><div class="muted">Manage the Xbox's external hard drive from here: see what is on it, what's missing compared with your library, copy games across and remove them.</div></div>
-    <div class="card" style="max-width:760px"><h2>Connect the drive</h2>
+    <div class="card" style="max-width:760px" id="s-browser"></div>
+    <div class="card" style="max-width:760px"><h2>Or connect it with the agent program</h2>
       <p class="muted">RustyBox runs on your server, so it can't see a drive plugged into another computer. A small <b>agent</b> on that computer shares the drive's folder with RustyBox.</p>
       <ol style="line-height:1.9;padding-left:20px">
         <li>Plug the drive into the computer and note where it is mounted (for example <span class="mono">/media/you/XBOXDRIVE</span>).</li>
@@ -161,6 +168,7 @@ function setup(root, ctx) {
         <div class="notice err hidden" id="s-err"></div></div>
       <p class="muted" style="margin-top:14px">More detail, including keeping the agent running in the background: <span class="mono">docs/drives-and-import.md</span>.</p></div>`;
   const $ = (s) => root.querySelector(s);
+  browserCard($("#s-browser"), ctx);
   root.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => copyText(b.dataset.copy)));
   const remote = () => ({ url: $("#s-url").value, token: $("#s-token").value, subdir: $("#s-sub").value.trim() || null });
   const fail = (m) => { $("#s-err").textContent = m; $("#s-err").classList.toggle("hidden", !m); };
@@ -177,5 +185,53 @@ function setup(root, ctx) {
       toast("Connected. Reading the drive…", "ok");
       ctx.openJob(job);
     } catch (e) { fail(e.message); }
+  };
+}
+
+// Share the drive straight from this browser: pick its folder, nothing to install or type.
+function browserCard(card, ctx) {
+  if (!browserDrive.supported()) {
+    const https = location.protocol !== "https:";
+    card.innerHTML = `<h2>Connect the drive from this browser</h2>
+      <p class="muted">${https
+        ? `This only works on a secure page. Open RustyBox at <a href="${esc(browserDrive.secureAddress())}">${esc(browserDrive.secureAddress())}</a> (your browser will warn about the certificate once, because RustyBox made it itself: choose to continue), then come back here.`
+        : "This browser can't share a folder. Use Chrome, Edge or Brave."}</p>`;
+    return;
+  }
+  card.innerHTML = `<h2>Connect the drive from this browser</h2>
+    <p class="muted">Plug the drive into <b>this computer</b>, then choose its folder. Nothing to install: this page does the file work for RustyBox, so keep a RustyBox page open while you use the drive.</p>
+    <div class="row" style="flex-direction:column;align-items:stretch;gap:10px;max-width:520px">
+      <label class="check"><input type="checkbox" id="b-w" checked><span>Allow RustyBox to copy games onto the drive (leave off to only look)</span></label>
+      <div class="row"><button class="btn primary" id="b-pick">Choose the drive folder…</button><span id="b-folder" class="muted"></span></div>
+      <div id="b-more" class="hidden" style="display:flex;flex-direction:column;gap:10px">
+        <label class="field">Name<input type="text" id="b-name" spellcheck="false"></label>
+        <label class="field">What the drive is formatted as<select id="b-fs"><option value="fat32">FAT32 (the usual for an Xbox drive: files must be under 4 GB)</option><option value="exfat">exFAT</option><option value="ntfs">NTFS</option><option value="other">Something else</option></select></label>
+        <label class="field">Folder on the drive that holds the games<input type="text" id="b-sub" value="Games" spellcheck="false"></label>
+        <div class="row"><button class="btn primary" id="b-go">Connect the drive</button></div></div>
+      <div class="notice err hidden" id="b-err"></div></div>`;
+  const $ = (s) => card.querySelector(s);
+  let handle;
+  const fail = (m) => { $("#b-err").textContent = m; $("#b-err").classList.toggle("hidden", !m); };
+  $("#b-pick").onclick = async () => {
+    fail("");
+    try {
+      handle = await browserDrive.choose($("#b-w").checked);
+      $("#b-folder").textContent = handle.name;
+      $("#b-name").value = $("#b-name").value || handle.name;
+      $("#b-more").classList.remove("hidden");
+    } catch (e) { if (e.name !== "AbortError") fail(e.message); }
+  };
+  $("#b-go").onclick = async () => {
+    fail("");
+    const writable = $("#b-w").checked;
+    $("#b-go").disabled = true;
+    try {
+      const name = $("#b-name").value.trim() || handle.name;
+      const shared = await browserDrive.share({ handle, name, writable, fsType: $("#b-fs").value });
+      const r = await api("/api/libraries", { body: { name: "Xbox drive", kind: "god", paths: [{ remote: { url: shared.url, token: shared.token, subdir: $("#b-sub").value.trim() || null, create: writable }, writable }] } });
+      const { job } = await api(`/api/libraries/${r.id}/scan`, { method: "POST" });
+      toast("Connected. Reading the drive…", "ok");
+      ctx.openJob(job);
+    } catch (e) { fail(e.message); $("#b-go").disabled = false; }
   };
 }

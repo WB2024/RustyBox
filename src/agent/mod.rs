@@ -130,7 +130,7 @@ pub fn router(state: Arc<AgentState>) -> Router {
 }
 
 /// Constant-time comparison, so the token can't be found out by timing.
-fn same(a: &str, b: &str) -> bool {
+pub fn same(a: &str, b: &str) -> bool {
     a.len() == b.len()
         && a.bytes()
             .zip(b.bytes())

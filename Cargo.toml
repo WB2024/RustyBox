@@ -1,6 +1,6 @@
 [package]
 name = "rustybox"
-version = "0.13.7"
+version = "0.14.0"
 edition = "2024"
 description = "Self-hosted manager for modded Xbox 360s: libraries, GOD conversion, console transfers, USB tools"
 license = "MIT"
@@ -36,6 +36,9 @@ ureq = { version = "2", features = ["json"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 quick-xml = "0.37"
 sha1 = "0.10"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
+axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
 
 [dev-dependencies]
 http-body-util = "0.1"

@@ -164,6 +164,8 @@ fn cookie_value(headers: &HeaderMap) -> Option<String> {
 
 fn is_public(path: &str) -> bool {
     matches!(path, "/api/login" | "/api/auth/status" | "/api/health")
+        // A drive shared from a browser: these calls carry the drive's own token.
+        || path.starts_with("/browser-agent/")
 }
 
 /// Everything needs a session once a login is set, except the login itself.

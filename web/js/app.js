@@ -127,6 +127,8 @@ async function quickFind() {
 }
 
 async function start() {
+  // Drives shared from this browser (Xbox drive page) keep answering from every page.
+  import("./browser-agent.js").then((m) => m.resume()).catch(() => {});
   nav();
   $("#menu").onclick = toggleMenu;
   $("#scrim").onclick = closeMenu;

@@ -8,6 +8,7 @@ services:
     stop_grace_period: 15s
     ports:
       - "8088:8080"                     # web UI → http://<server>:8088
+      - "8443:8443"                     # the same UI over HTTPS (self-signed): lets the browser share a drive
     volumes:
       - ./config:/config                # settings and the index
       # Library storage. RustyBox only sees these container paths; mount host disks and

@@ -5,6 +5,7 @@ pub mod dedupe;
 pub mod health;
 pub mod misplaced;
 pub mod scan;
+pub mod scan_remote;
 pub mod tidy;
 
 use std::path::{Path, PathBuf};

@@ -27,10 +27,11 @@ COPY --from=build /src/target/release/rustybox /usr/local/bin/rustybox
 COPY --from=abgx /out/abgx360 /usr/local/bin/abgx360
 
 ENV RUSTYBOX_BIND=0.0.0.0:8080 \
+    RUSTYBOX_TLS_BIND=0.0.0.0:8443 \
     RUSTYBOX_CONFIG_DIR=/config
 
 VOLUME ["/config"]
-EXPOSE 8080
+EXPOSE 8080 8443
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD ["rustybox", "healthcheck"]
 ENTRYPOINT ["rustybox"]
 CMD ["serve"]

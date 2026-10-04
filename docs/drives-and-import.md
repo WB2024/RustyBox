@@ -2,7 +2,21 @@
 
 ## A drive attached to another computer
 
-RustyBox only sees folders inside its own container. A drive plugged into your PC (for example the Xbox's hard drive) isn't one of them, so a small program, the **drive agent**, runs on that PC and shares one folder with RustyBox over your network.
+RustyBox only sees folders inside its own container. A drive plugged into your PC (for example the Xbox's hard drive) isn't one of them. There are two ways to share it: straight from your browser (nothing to install), or with a small program, the **drive agent**.
+
+### From your browser (Chrome, Edge or Brave, on Linux, macOS or Windows)
+
+1. Plug the drive into the computer you are browsing from and let the system mount it as usual.
+2. Open RustyBox over **HTTPS**: `https://<server>:8443`. RustyBox makes its own certificate, so the browser warns once per computer; choose to continue. (Browsers only allow a page to pick a folder when the page is secure.) Publish port `8443` in your compose file, as in the install guide. A server behind your own HTTPS proxy works the same, with no warning.
+3. **Xbox drive → Choose the drive folder…**, pick the drive, say what it is formatted as (FAT32 limits single files to under 4 GB) and the folder that holds the games, then **Connect the drive**. Leave *Allow RustyBox to copy games onto the drive* off to only look.
+
+RustyBox now treats it like any other drive: it scans it, compares it with a library, copies games to it. The page does the file work, so **keep a RustyBox page open** in that browser while you use the drive. After closing the browser, open RustyBox again and press **Reconnect** on the Xbox drive page (the browser asks you again for permission to use the folder). If the browser isn't connected, the drive shows as offline and RustyBox keeps its list.
+
+Limits of this way, compared with the agent: a browser can't see free space or the drive's format (you say it, and a full drive is reported when a write fails), RustyBox reads the games' headers piece by piece over the page (the first scan is slower), and some browsers can't rename a folder, so renames of whole folders (Tidy) may be refused there. Writes still go to `*.part` and are renamed when complete. Only drives you pick in your own browser are ever reachable, and the connection is tied to a token only that browser holds.
+
+### With the drive agent program
+
+A small program runs on the PC and shares one folder with RustyBox over your network.
 
 ### Running the agent
 

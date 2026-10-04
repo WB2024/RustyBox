@@ -107,3 +107,8 @@ See `docs/interface.md`.
 ## Update (v0.13.0): torrents
 
 qBittorrent support in two ways (`docs/torrents.md`): torrent indexers (Torznab) searched and graded by seeders alongside Usenet, and a **Torrents** page that lists `.torrent` files in folders you choose, shows every file inside one (the Redump Xbox 360 collection is one torrent of 4,459 zipped games), and downloads only the ticked files. Finished downloads are imported by hardlink/copy/move (the torrent keeps seeding by default); zipped disc images are unpacked first. Not yet run against a real qBittorrent.
+
+## Update (v0.13.7 / v0.14.0): search inside torrent files, drive from the browser
+
+- Wanted/Discover search windows have a **My torrent files** tab: find a game inside the files listed in your `.torrent` folders and grab just that file (`docs/wanted.md`).
+- **Xbox drive from the browser** (`docs/drives-and-import.md`): pick the mounted drive's folder on the page (File System Access API, Chrome/Edge/Brave), no agent program or token typing. RustyBox serves HTTPS on :8443 with a self-signed certificate (the API needs a secure page). The page answers the server's jobs over a long-poll relay (`src/web/browser_agent.rs`) speaking the agent's own `/agent/v1` calls, so everything else is unchanged; scanning is done server-side by reading headers in ranges (`src/library/scan_remote.rs`). Verified: relay and scan equal to the real agent in tests, and the page's agent against a real Chromium file handle (OPFS). Not verified: a real picked folder on the user's disk (a browser needs a human to pick one), and folder renames (Tidy) may be refused where the browser can't move a directory.

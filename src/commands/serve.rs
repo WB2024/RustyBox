@@ -10,6 +10,11 @@ pub struct ServeArgs {
     #[arg(long, env = "RUSTYBOX_BIND", default_value = "0.0.0.0:8080")]
     pub bind: SocketAddr,
 
+    /// Also answer over HTTPS here (self-signed certificate; a browser needs HTTPS to share a
+    /// folder of this computer, such as the Xbox drive). `off` turns it off.
+    #[arg(long, env = "RUSTYBOX_TLS_BIND", default_value = "0.0.0.0:8443")]
+    pub tls_bind: String,
+
     /// Where settings and the index are stored (mount a volume here in Docker)
     #[arg(long, env = "RUSTYBOX_CONFIG_DIR", default_value = "./config")]
     pub config_dir: PathBuf,
@@ -78,7 +83,15 @@ pub fn run(args: ServeArgs) -> Result<(), Error> {
         },
     };
     let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(web::serve(cfg, args.bind))
+    let tls = match args.tls_bind.trim() {
+        "" | "off" | "false" | "0" => None,
+        a => Some(a.parse::<SocketAddr>().map_err(|e| {
+            Error::validation(format!(
+                "--tls-bind must look like 0.0.0.0:8443 or off: {e}"
+            ))
+        })?),
+    };
+    rt.block_on(web::serve_with_tls(cfg, args.bind, tls))
 }
 
 #[cfg(test)]

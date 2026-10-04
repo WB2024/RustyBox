@@ -91,16 +91,21 @@ pub fn read_iso_file(path: &Path) -> Result<Meta, String> {
     read_iso(&File::open(path).map_err(|e| format!("Could not open it: {e}"))?)
 }
 
-/// The container file of a GOD title folder (`<TitleID>/<content type>/<container>`). The playable
-/// game content types are preferred when several exist (a title can also hold add-on content).
-pub fn find_god_container(title_dir: &Path) -> Result<std::path::PathBuf, String> {
-    let rank = |ct: &str| match u32::from_str_radix(ct, 16).ok() {
+/// How much a content-type folder name is preferred as the game's container (lower is better).
+pub fn god_rank(ct: &str) -> u8 {
+    match u32::from_str_radix(ct, 16).ok() {
         Some(0x7000) => 0,
         Some(0x5000) => 1,
         Some(0xD0000) => 2,
         Some(0x4000) => 3,
         _ => 9,
-    };
+    }
+}
+
+/// The container file of a GOD title folder (`<TitleID>/<content type>/<container>`). The playable
+/// game content types are preferred when several exist (a title can also hold add-on content).
+pub fn find_god_container(title_dir: &Path) -> Result<std::path::PathBuf, String> {
+    let rank = god_rank;
     let mut candidates: Vec<(u8, std::path::PathBuf)> = Vec::new();
     for ct in std::fs::read_dir(title_dir)
         .map_err(|e| e.to_string())?
@@ -128,11 +133,22 @@ pub fn find_god_container(title_dir: &Path) -> Result<std::path::PathBuf, String
         .ok_or_else(|| "No container file found (expected <content type>/<container>)".to_string())
 }
 
-/// Problems with a GOD package's files: an empty or short container, missing data files, empty
-/// data files, or data that doesn't add up to what the container says. Empty means it looks complete.
-pub fn god_problems(container: &Path) -> Vec<String> {
+/// Is this a content type whose game lives in a `.data` folder next to the container (a Games on
+/// Demand package)? Arcade games and add-ons are a single file.
+pub fn god_has_data_folder(content_type: Option<u32>) -> bool {
+    matches!(content_type, Some(0x7000) | Some(0x5000) | None)
+}
+
+/// Problems with a GOD package, from what was found: the container's size, its content type, the
+/// sizes of `Data0000`, `Data0001`... (None when they weren't looked at) and the number of data
+/// files its header says there are. Empty means it looks complete.
+pub fn god_problem_list(
+    size: u64,
+    content_type: Option<u32>,
+    data_sizes: Option<&[u64]>,
+    parts: Option<usize>,
+) -> Vec<String> {
     let mut out = Vec::new();
-    let size = std::fs::metadata(container).map(|m| m.len()).unwrap_or(0);
     if size == 0 {
         out.push(
             "The container file is empty (0 bytes): this game was copied incompletely".to_string(),
@@ -144,20 +160,10 @@ pub fn god_problems(container: &Path) -> Vec<String> {
     }
     // Only Games on Demand packages keep their game in a `.data` folder; Xbox Live Arcade games and
     // add-on content are a single file, so there is nothing more to check for them.
-    let content_type = container
-        .parent()
-        .and_then(|p| p.file_name())
-        .and_then(|n| u32::from_str_radix(&n.to_string_lossy(), 16).ok());
-    if !matches!(content_type, Some(0x7000) | Some(0x5000) | None) {
+    if !god_has_data_folder(content_type) {
         return out;
     }
-    let mut data = container.as_os_str().to_owned();
-    data.push(".data");
-    let data = std::path::PathBuf::from(data);
-    let mut sizes: Vec<u64> = Vec::new();
-    while let Ok(m) = std::fs::metadata(data.join(format!("Data{:04}", sizes.len()))) {
-        sizes.push(m.len());
-    }
+    let sizes = data_sizes.unwrap_or(&[]);
     let empty = sizes.iter().filter(|s| **s == 0).count();
     if sizes.is_empty() {
         out.push("There are no data files".to_string());
@@ -168,34 +174,69 @@ pub fn god_problems(container: &Path) -> Vec<String> {
         ));
     }
     // What the header says there should be.
-    if size >= 0x3A8
-        && let Ok(f) = File::open(container)
+    if let Some(parts) = parts
+        && parts > 0
+        && parts < 10_000
+        && sizes.len() < parts
     {
-        let mut h = [0u8; 8];
-        if f.read_exact_at(&mut h, 0x3A0).is_ok() {
-            let parts = u32::from_le_bytes([h[0], h[1], h[2], h[3]]) as usize;
-            if parts > 0 && parts < 10_000 && sizes.len() < parts {
-                out.push(format!(
-                    "{} of {parts} data files are missing",
-                    parts - sizes.len()
-                ));
-            }
-        }
+        out.push(format!(
+            "{} of {parts} data files are missing",
+            parts - sizes.len()
+        ));
     }
     out
+}
+
+/// The number of data files a container's header names (at 0x3A0), if the header is there.
+pub fn god_parts<R: ReadAt>(r: &R, size: u64) -> Option<usize> {
+    if size < 0x3A8 {
+        return None;
+    }
+    let mut h = [0u8; 8];
+    r.read_exact_at(&mut h, 0x3A0).ok()?;
+    Some(u32::from_le_bytes([h[0], h[1], h[2], h[3]]) as usize)
+}
+
+/// Problems with a GOD package's files: an empty or short container, missing data files, empty
+/// data files, or data that doesn't add up to what the container says. Empty means it looks complete.
+pub fn god_problems(container: &Path) -> Vec<String> {
+    let size = std::fs::metadata(container).map(|m| m.len()).unwrap_or(0);
+    let content_type = container
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| u32::from_str_radix(&n.to_string_lossy(), 16).ok());
+    if !god_has_data_folder(content_type) {
+        return god_problem_list(size, content_type, None, None);
+    }
+    let mut data = container.as_os_str().to_owned();
+    data.push(".data");
+    let data = std::path::PathBuf::from(data);
+    let mut sizes: Vec<u64> = Vec::new();
+    while let Ok(m) = std::fs::metadata(data.join(format!("Data{:04}", sizes.len()))) {
+        sizes.push(m.len());
+    }
+    let parts = File::open(container).ok().and_then(|f| god_parts(&f, size));
+    god_problem_list(size, content_type, Some(&sizes), parts)
 }
 
 /// Read a GOD title folder: the container is an STFS package whose header names the game.
 pub fn read_god_dir(title_dir: &Path) -> Result<Meta, String> {
     let container = &find_god_container(title_dir)?;
     let problems = god_problems(container);
-    if std::fs::metadata(container).map(|m| m.len()).unwrap_or(0) < 0x1800 {
+    let size = std::fs::metadata(container).map(|m| m.len()).unwrap_or(0);
+    let file = File::open(container).map_err(|e| format!("Could not open the container: {e}"))?;
+    god_meta(&file, size, problems)
+}
+
+/// The game a GOD container's header describes. `problems` are noted on it (or, if the container
+/// is too small to read, are the error).
+pub fn god_meta<R: ReadAt>(file: &R, size: u64, problems: Vec<String>) -> Result<Meta, String> {
+    if size < 0x1800 {
         return Err(problems
             .into_iter()
             .next()
             .unwrap_or_else(|| "The container file is too small to be a game".into()));
     }
-    let file = File::open(container).map_err(|e| format!("Could not open the container: {e}"))?;
     let mut buf = vec![0u8; stfs::HEADER_LEN];
     let mut got = 0;
     // The container may be shorter than the full header; read what is there.
