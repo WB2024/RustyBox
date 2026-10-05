@@ -82,6 +82,8 @@ const REGION_WORDS: &[(&str, Region)] = &[
     ("japan", Region::Japan),
     ("rf", Region::Free),
     ("regionfree", Region::Free),
+    // Redump and No-Intro say "World" for a disc that works everywhere.
+    ("world", Region::Free),
     ("ntsc", Region::Usa),
 ];
 const LANGUAGES: &[&str] = &[
@@ -134,6 +136,7 @@ const LANGUAGE_CODES: &[&str] = &[
 
 /// Tags that say something about the release, not the game.
 const TAGS: &[&str] = &[
+    "xbla",
     "proper",
     "repack",
     "readnfo",
@@ -274,6 +277,8 @@ pub fn parse(title: &str) -> Parsed {
         || joined.contains("gods ");
     let not_a_game = [
         ("dlc", "DLC"),
+        ("addon", "an add-on"),
+        ("addons", "add-ons"),
         ("update", "a title update"),
         ("tu", "a title update"),
         ("demo", "a demo"),
@@ -322,6 +327,11 @@ pub fn parse(title: &str) -> Parsed {
     let noise = |t: &str| {
         PLATFORM_360.contains(&t)
             || t == "xbox"
+            // A title id in the name, as No-Intro writes "(584108B7)".
+            || t.len() == 8
+                && t.bytes().all(|b| b.is_ascii_hexdigit())
+                && t.bytes().any(|b| b.is_ascii_digit())
+                && t.bytes().any(|b| b.is_ascii_alphabetic())
             || REGION_WORDS.iter().any(|(w, _)| *w == t)
             || LANGUAGES.contains(&t)
             || TAGS.contains(&t)
