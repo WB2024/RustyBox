@@ -33,9 +33,13 @@ export async function searchDialog(w, done) {
   const drawFiles = () => {
     const showRej = q("#sr-rej").checked;
     if (!q("#sr-ctl").querySelector("#tf-go")) {
-      q("#sr-ctl").innerHTML = `<div class="row" style="gap:8px;margin-bottom:10px;flex-wrap:wrap"><select id="tf-dir"><option value="">All folders</option>${tstat.dirs.map((d) => `<option value="${d.index}">${esc(d.path)} (${d.count})</option>`).join("")}</select><input id="tf-filter" class="grow" style="min-width:220px" placeholder="Torrent file name contains… (e.g. redump), blank = Xbox 360 torrents"><button class="btn primary" id="tf-go">Search</button></div>`;
+      q("#sr-ctl").innerHTML = `<div class="row" style="gap:8px;margin-bottom:6px;flex-wrap:wrap"><select id="tf-dir"><option value="">All folders</option>${tstat.dirs.map((d) => `<option value="${d.index}">${esc(d.path.split("/").slice(-2).join("/"))} (${d.count})</option>`).join("")}</select><button class="btn" id="tf-pick">Choose torrent files…</button><span class="muted" id="tf-sel"></span></div>
+        <div class="row" style="gap:8px;margin-bottom:10px;flex-wrap:wrap"><input id="tf-filter" class="grow" style="min-width:220px" placeholder="Or torrent file name contains… (e.g. xbox 360). Blank = the Xbox 360 ones"><button class="btn primary" id="tf-go">Search</button></div>`;
       q("#tf-go").onclick = runFiles;
       q("#tf-filter").onkeydown = (e) => { if (e.key === "Enter") runFiles(); };
+      q("#tf-dir").onchange = () => { sel = loadSel(); showSel(); };
+      q("#tf-pick").onclick = pickFiles;
+      sel = loadSel(); showSel();
     }
     if (!fdata) { q("#sr").innerHTML = `<div class="muted">Search inside the files listed in your .torrent files. Pick a folder, or type part of a torrent file's name to use just that one.</div>`; q("#sr-sum").textContent = ""; return; }
     const rows = fdata.results.filter((j) => showRej || !j.verdict.rejected.length);
@@ -53,10 +57,44 @@ export async function searchDialog(w, done) {
       catch (e) { toast(e.message, "err"); }
     }));
   };
+  // Which torrent files to search in, remembered per folder.
+  let sel = new Set();
+  const dirKey = () => { const v = q("#tf-dir")?.value; return v === "" || v == null ? null : "rb-tf-" + tstat.dirs.find((d) => String(d.index) === v)?.path; };
+  const loadSel = () => { const k = dirKey(); if (!k) return new Set(); try { return new Set(JSON.parse(localStorage.getItem(k) || "[]")); } catch { return new Set(); } };
+  const saveSel = () => { const k = dirKey(); if (k) try { localStorage.setItem(k, JSON.stringify([...sel])); } catch { /* private mode */ } };
+  const showSel = () => {
+    const one = dirKey() !== null;
+    q("#tf-pick").disabled = !one;
+    q("#tf-filter").disabled = sel.size > 0;
+    q("#tf-sel").innerHTML = !one ? "Pick one folder to choose its torrent files" : sel.size ? `${sel.size} torrent file${sel.size === 1 ? "" : "s"} chosen: <span class="mono">${esc([...sel].slice(0, 2).map((x) => x.split("/").pop()).join(", "))}${sel.size > 2 ? "…" : ""}</span> <button class="btn small" id="tf-clear">Clear</button>` : "none chosen: all torrents matching the name (or the Xbox 360 ones) are searched";
+    const c = q("#tf-clear"); if (c) c.onclick = () => { sel = new Set(); saveSel(); showSel(); };
+  };
+  const pickFiles = () => {
+    const dir = q("#tf-dir").value;
+    const m = el(`<div class="modal-bg"><div class="modal wide" style="height:auto;max-height:90vh;width:min(820px,96vw)"><header>Torrent files to search in</header><div class="body" style="padding-top:12px"><div class="row" style="gap:8px;margin-bottom:8px"><input id="pk-q" class="grow" placeholder="Filter the list (words in any order)"><button class="btn small" id="pk-all">Tick shown</button><button class="btn small" id="pk-none">Clear</button></div><div id="pk-list" style="max-height:52vh;overflow:auto"><span class="muted">Loading…</span></div></div><footer><span class="muted grow" id="pk-sum"></span><button class="btn primary" id="pk-done">Done</button></footer></div></div>`);
+    document.body.append(m);
+    const p = (x) => m.querySelector(x);
+    let shown = [], timer;
+    const sum = () => { p("#pk-sum").textContent = `${sel.size} chosen`; };
+    const load = async () => {
+      try {
+        const r = await api(`/api/torrents/files?dir=${dir}&limit=1000&q=${encodeURIComponent(p("#pk-q").value)}`);
+        shown = r.files.map((f) => f.file);
+        p("#pk-list").innerHTML = shown.length ? shown.map((f, i) => `<label class="check" style="display:flex;padding:3px 0"><input type="checkbox" data-i="${i}" ${sel.has(f) ? "checked" : ""}><span style="word-break:break-all">${esc(f)}</span></label>`).join("") + (r.total > shown.length ? `<div class="muted" style="margin-top:6px">Showing the first ${shown.length} of ${r.total}: type in the filter to narrow it.</div>` : "") : `<div class="muted">No torrent files match.</div>`;
+        p("#pk-list").querySelectorAll("input").forEach((c) => (c.onchange = () => { const f = shown[+c.dataset.i]; if (c.checked) sel.add(f); else sel.delete(f); sum(); }));
+      } catch (e) { p("#pk-list").innerHTML = `<div class="notice err">${esc(e.message)}</div>`; }
+      sum();
+    };
+    p("#pk-q").oninput = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
+    p("#pk-all").onclick = () => { shown.forEach((f) => sel.add(f)); load(); };
+    p("#pk-none").onclick = () => { sel = new Set(); load(); };
+    p("#pk-done").onclick = () => { m.remove(); saveSel(); showSel(); };
+    load();
+  };
   const runFiles = async () => {
     q("#sr").innerHTML = `<span class="muted">Reading your torrent files…</span>`;
     const dir = q("#tf-dir").value, filter = q("#tf-filter").value.trim();
-    try { fdata = await api(`/api/wanted/${w.id}/search-files`, { body: { dir: dir === "" ? null : +dir, filter } }); drawFiles(); }
+    try { fdata = await api(`/api/wanted/${w.id}/search-files`, { body: { dir: dir === "" ? null : +dir, filter, files: dir !== "" ? [...sel] : [] } }); drawFiles(); }
     catch (e) { q("#sr").innerHTML = `<div class="notice err">${esc(e.message)}</div>`; }
   };
   q("#sr-tabs").querySelectorAll("[data-t]").forEach((b) => (b.onclick = () => {

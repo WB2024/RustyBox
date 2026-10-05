@@ -435,6 +435,10 @@ struct SearchFilesReq {
     /// Only torrent files whose name contains all these words.
     #[serde(default)]
     filter: String,
+    /// Exactly these torrent files (names inside the folder, as the file list gives them). Needs
+    /// `dir`. When given, `filter` is not used.
+    #[serde(default)]
+    files: Vec<String>,
 }
 
 const MAX_HITS: usize = 300;
@@ -469,6 +473,10 @@ async fn search_files(
             "No torrent folders are set up. Add one on the Torrents page.",
         ));
     }
+    if !r.files.is_empty() && r.dir.is_none() {
+        return Err(ApiError::bad("Choose a folder to pick torrent files from"));
+    }
+    let only: std::collections::HashSet<String> = r.files.iter().cloned().collect();
     let words: Vec<String> = r
         .filter
         .to_lowercase()
@@ -476,7 +484,8 @@ async fn search_files(
         .map(String::from)
         .collect();
     let profile = cfg.profile.clone();
-    let out = blocking(move || Ok(run_search(&dirs, &words, &names, &profile, &blocked))).await?;
+    let out =
+        blocking(move || Ok(run_search(&dirs, &words, &only, &names, &profile, &blocked))).await?;
     Ok(Json(json!({
         "wanted": w,
         "torrents": out.torrents,
@@ -528,6 +537,7 @@ fn judge_file(
 fn run_search(
     dirs: &[(usize, PathBuf)],
     words: &[String],
+    only: &std::collections::HashSet<String>,
     names: &[String],
     profile: &release::Profile,
     blocked: &std::collections::HashSet<String>,
@@ -548,7 +558,9 @@ fn run_search(
     for (di, root) in dirs {
         let found = list_torrents(root);
         let total = found.len();
-        let chosen: Vec<&Found> = if words.is_empty() {
+        let chosen: Vec<&Found> = if !only.is_empty() {
+            found.iter().filter(|f| only.contains(&f.rel)).collect()
+        } else if words.is_empty() {
             let xbox: Vec<&Found> = found.iter().filter(|f| looks_like_360(&f.rel)).collect();
             if xbox.is_empty() {
                 found.iter().take(60).collect()
@@ -564,7 +576,7 @@ fn run_search(
                 })
                 .collect()
         };
-        if chosen.len() < total && words.is_empty() && chosen.len() == 60 {
+        if only.is_empty() && chosen.len() < total && words.is_empty() && chosen.len() == 60 {
             out.notes.push(format!(
                 "{}: no Xbox 360 torrents recognised by name, so the first 60 of {} were searched. Type part of a torrent file's name to narrow it.",
                 root.display(),

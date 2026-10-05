@@ -1107,6 +1107,30 @@ async fn a_wanted_game_is_searched_for_inside_the_torrent_files_and_one_file_is_
     )
     .await;
     assert_eq!(r2["torrents"], 1);
+    // Exactly the torrent files chosen are read, whatever their names; a choice needs a folder.
+    let (_, r3) = call(
+        app,
+        "POST",
+        &format!("/api/wanted/{wid}/search-files"),
+        Some(json!({"dir": 0, "files": ["Sega Dreamcast.torrent", "missing.torrent"]})),
+    )
+    .await;
+    assert_eq!(r3["torrents"], 1, "{r3}");
+    assert!(
+        r3["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|x| x["torrent_file"] == "Sega Dreamcast.torrent")
+    );
+    let (st, _) = call(
+        app,
+        "POST",
+        &format!("/api/wanted/{wid}/search-files"),
+        Some(json!({"files": ["Sega Dreamcast.torrent"]})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
     let (st, _) = call(
         app,
         "POST",
