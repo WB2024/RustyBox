@@ -320,6 +320,23 @@ fn add_chosen(
         .copied()
         .filter(|i| !wanted.contains(i) && (!existed || listed[*i].progress == 0.0))
         .collect();
+    // What qBittorrent should end up fetching: the chosen files, anything already being fetched
+    // that was left on, and a little for the pieces shared with neighbouring files.
+    let kept: u64 = all
+        .iter()
+        .filter(|i| !wanted.contains(i) && !skip.contains(i) && listed[**i].priority > 0)
+        .map(|i| t.files[*i].size)
+        .sum();
+    let expected: u64 = wanted.iter().map(|i| t.files[*i].size).sum::<u64>() + kept;
+    let allowed = expected + (wanted.len() as u64) * (128 << 20) + (256 << 20);
+    // qBittorrent's own total of what it will fetch. It can lag behind the file switches (it once
+    // kept "94 GB wanted" for one 184 MB file and fetched the lot), so it is checked, not assumed.
+    let wanted_ok = || -> Result<bool, Error> {
+        let info = q.info(std::slice::from_ref(&hash))?;
+        Ok(info
+            .first()
+            .is_none_or(|i| i.wanted == 0 || i.wanted <= allowed))
+    };
     let set = (|| {
         q.skip_files(&hash, &skip)?;
         if existed {
@@ -335,7 +352,34 @@ fn add_chosen(
                 "qBittorrent didn't switch the files as asked, so nothing was started",
             ));
         }
-        q.start(&hash)
+        // Give it a moment, and if its total still counts files that are switched off, stop it and
+        // switch them on and off again, which makes it work the total out afresh.
+        let mut ok = false;
+        for _ in 0..5 {
+            std::thread::sleep(Duration::from_millis(700));
+            if wanted_ok()? {
+                ok = true;
+                break;
+            }
+            let _ = q.stop(&hash);
+            q.set_priority(&hash, &skip, 1)?;
+            q.set_priority(&hash, &skip, 0)?;
+        }
+        if !ok {
+            return Err(Error::backend(
+                "qBittorrent still counts files that are switched off, so nothing was started",
+            ));
+        }
+        q.start(&hash)?;
+        // And once it runs: if it has taken on more than was chosen, stop it at once.
+        std::thread::sleep(Duration::from_secs(2));
+        if !wanted_ok()? {
+            let _ = q.stop(&hash);
+            return Err(Error::backend(
+                "qBittorrent started fetching more than was chosen, so it was stopped",
+            ));
+        }
+        Ok(())
     })();
     set.map_err(&undo)?;
     let size: u64 = wanted.iter().map(|i| t.files[*i].size).sum();

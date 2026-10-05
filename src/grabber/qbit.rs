@@ -67,6 +67,9 @@ pub struct TorrentInfo {
     pub percent: f32,
     /// Bytes still to fetch, of the chosen files.
     pub left: u64,
+    /// Bytes qBittorrent has marked to download in all (its `size`): the chosen files, plus the
+    /// pieces they share with their neighbours. 0 when qBittorrent doesn't say.
+    pub wanted: u64,
     /// Where the torrent's files are (a folder, or the file for a one-file torrent), as qBittorrent sees it.
     pub content_path: String,
     pub save_path: String,
@@ -407,6 +410,7 @@ impl Qbit {
                         state: t["state"].as_str().unwrap_or("").into(),
                         percent: (t["progress"].as_f64().unwrap_or(0.0) * 100.0) as f32,
                         left: t["amount_left"].as_u64().unwrap_or(0),
+                        wanted: t["size"].as_u64().unwrap_or(0),
                         content_path: t["content_path"].as_str().unwrap_or("").into(),
                         save_path: t["save_path"].as_str().unwrap_or("").into(),
                         ratio: t["ratio"].as_f64().unwrap_or(0.0) as f32,

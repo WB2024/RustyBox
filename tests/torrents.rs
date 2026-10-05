@@ -163,6 +163,8 @@ struct Qb {
     log: Vec<String>,
     /// Answer "404" to this many file listings, as a big torrent that isn't registered yet does.
     files_404: u32,
+    /// Report a huge "wanted" total until files are switched on again (qBittorrent's stale total).
+    stale_total: bool,
 }
 
 type Shared = Arc<Mutex<Qb>>;
@@ -263,7 +265,8 @@ async fn fake_qbit() -> (String, Shared) {
             let g = q.lock().unwrap();
             let want: Option<Vec<&str>> = f.get("hashes").map(|h| h.split('|').collect());
             let list: Vec<Value> = g.torrents.iter().filter(|(h, _)| want.as_ref().is_none_or(|w| w.contains(&h.as_str()))).map(|(h, t)| {
-                json!({"hash": h, "name": t.name, "state": t.state, "progress": t.progress,
+                let wanted: u64 = if g.stale_total { 94_000_000_000 } else { t.files.iter().filter(|f| f.2 > 0).map(|f| f.1).sum() };
+                json!({"hash": h, "name": t.name, "state": t.state, "progress": t.progress, "size": wanted,
                        "amount_left": if t.progress >= 1.0 { 0 } else { 1000 }, "content_path": t.content_path,
                        "save_path": "/downloads", "ratio": 0.0})
             }).collect();
@@ -292,6 +295,9 @@ async fn fake_qbit() -> (String, Shared) {
             let mut g = q.lock().unwrap();
             g.log.push(format!("filePrio id={} priority={}", f["id"], f["priority"]));
             let prio: u32 = f["priority"].parse().unwrap();
+            if prio > 0 {
+                g.stale_total = false;
+            }
             if let Some(t) = g.torrents.get_mut(&f["hash"]) {
                 for i in f["id"].split('|') {
                     t.files[i.parse::<usize>().unwrap()].2 = prio;
@@ -1262,4 +1268,47 @@ async fn only_the_chosen_file_is_ever_switched_on_even_when_qbittorrent_is_slow_
         vec![0, 0, 1],
         "nothing but the chosen file is on: {v}"
     );
+}
+
+#[tokio::test]
+async fn a_total_that_qbittorrent_has_not_worked_out_is_fixed_before_anything_runs() {
+    let (base, qb) = fake_qbit().await;
+    let e = env("stale");
+    let app = &e.app;
+    setup(&e, &base, json!({})).await;
+    let t = make_torrent(
+        "Minerva_Myrient",
+        &[
+            ("A/One.zip", 1_000_000),
+            ("A/Two.zip", 2_000_000),
+            ("A/Three.zip", 3_000_000),
+        ],
+    );
+    fs::write(e.root.join("torrents/t.torrent"), &t).unwrap();
+    let (st, _) = call(
+        app,
+        "PUT",
+        "/api/torrents/dirs",
+        Some(json!({"dirs": [e.root.join("torrents").to_string_lossy()]})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    qb.lock().unwrap().stale_total = true;
+    let (st, v) = call(
+        app,
+        "POST",
+        "/api/torrents/send",
+        Some(json!({"dir": 0, "file": "t.torrent", "select": [1]})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    let hash = torrent::parse(&t).unwrap().info_hash;
+    let g = qb.lock().unwrap();
+    let prios: Vec<u32> = g.torrents[&hash].files.iter().map(|f| f.2).collect();
+    assert_eq!(prios, vec![0, 1, 0]);
+    assert!(
+        !g.stale_total,
+        "the files were switched on and off again to refresh it"
+    );
+    assert!(!g.torrents[&hash].stopped, "and then it was started");
 }
