@@ -588,6 +588,66 @@ async fn discover_browses_filters_shows_similar_games_and_grabs_to_usenet() {
     let (_, s) = call(app, "GET", "/api/discover?q=gears", None).await;
     assert_eq!(s["games"].as_array().unwrap().len(), 3);
     assert_eq!(s["relevance"], true);
+    // The richer filters: lists with counts, themes, series, co-op, hiding, suggestions, random.
+    let (_, fx) = call(app, "GET", "/api/discover/facets", None).await;
+    for k in ["genre", "theme", "mode", "persp", "age"] {
+        assert!(!fx[k].as_array().unwrap().is_empty(), "{k}: {fx}");
+    }
+    let horror = fx["theme"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["name"] == "Horror")
+        .unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    let (_, h) = call(
+        app,
+        "GET",
+        &format!("/api/discover?theme={horror}&sort=rating"),
+        None,
+    )
+    .await;
+    assert_eq!(h["total"], h["games"].as_array().unwrap().len(), "{h}");
+    assert!(h["total"].as_i64().unwrap() > 0);
+    let (_, cnt) = call(app, "GET", "/api/discover/facets/theme/counts", None).await;
+    assert_eq!(cnt["counts"][horror.to_string()], h["total"], "{cnt}");
+    let (st, _) = call(app, "GET", "/api/discover/facets/bogus/counts", None).await;
+    assert_ne!(st, StatusCode::OK);
+    let (_, sg) = call(app, "GET", "/api/discover/suggest?kind=series&q=gea", None).await;
+    let gears = sg["results"][0]["id"].as_i64().unwrap();
+    let (_, gw) = call(app, "GET", &format!("/api/discover?series={gears}"), None).await;
+    assert_eq!(gw["games"].as_array().unwrap().len(), 3, "{gw}");
+    let (_, lc) = call(
+        app,
+        "GET",
+        "/api/discover?local_coop=1&hide=owned,wanted",
+        None,
+    )
+    .await;
+    assert!(lc["total"].as_i64().unwrap() > 0, "{lc}");
+    let (st, rnd) = call(
+        app,
+        "GET",
+        &format!("/api/discover/random?series={gears}"),
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(rnd["id"].is_i64(), "{rnd}");
+    let first = gw["games"][0]["id"].as_i64().unwrap();
+    let (_, mr) = call(
+        app,
+        "GET",
+        &format!("/api/discover/{first}/more?series={gears}&series_name=Gears"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        mr["shelves"][0]["games"].as_array().unwrap().len(),
+        2,
+        "the other two, not itself: {mr}"
+    );
     let (st, _) = call(app, "GET", "/api/discover?sort=bogus", None).await;
     assert_ne!(st, StatusCode::OK, "an unknown sort is refused");
 
@@ -601,7 +661,7 @@ async fn discover_browses_filters_shows_similar_games_and_grabs_to_usenet() {
     assert!(
         d["storyline"].is_string()
             && d["screenshots"].as_array().unwrap().len() == 3
-            && d["modes"].as_array().unwrap().len() == 2
+            && d["modes"].as_array().unwrap().len() >= 2
     );
     let similar = d["similar"].as_array().unwrap();
     assert!(

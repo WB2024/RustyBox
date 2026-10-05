@@ -52,7 +52,7 @@ No ads. No subscriptions. No tracking. No paywalled "pro" tier. Ever.
 | 🔄 **Convert in one click** | ISO ⇄ Games on Demand, unpack to a folder, build an ISO from a folder, check and fix ISOs. Multi-disc games handled. Every action shows a plan first. |
 | 🕹️ **Straight to the console** | Browse, scan, compare and send games to your Xbox 360 over FTP (Aurora). Replace a game without losing its saves. |
 | 💽 **Manage the Xbox's hard drive** | Compare the drive with your library, mirror it, tidy it, and find add-ons and updates that are in the wrong folder, without ever unplugging it from its PC. |
-| 🧭 **Discover and download** | Browse every Xbox 360 game on IGDB, see similar games, then grab one from **Usenet or torrents**. It is downloaded, converted to GOD, put in your library, copied to the drive and sent to the console, automatically if you want. |
+| 🧭 **Discover and download** | Browse every Xbox 360 game on IGDB with real filters (genre, theme, game mode, series, developer, age rating, co-op and more), see everything about a game, then grab one from **Usenet or torrents**. It is downloaded, converted to GOD, put in your library, copied to the drive and sent to the console, automatically if you want. |
 | 💽 **Xbox drive from your browser** | Plug the Xbox's hard drive into any computer, open RustyBox in Chrome, Edge or Brave and pick the folder. No program to install, no token to type. |
 | 🧲 **Torrents, your way** | Search torrent indexers like you do Usenet, or open a `.torrent` file, **tick just the files you want** out of thousands, and qBittorrent downloads only those. From a wanted game, **search inside your torrent files** (pick the folder, or one torrent) and grab just that game. |
 | 🧩 **Mods, trainers and updates** | Install mods, trainers and homebrew, and find and install title updates, all with a preview of exactly where each file goes. |
@@ -198,7 +198,7 @@ Plug the drive into a PC and run the tiny drive agent there ([how](docs/installa
 - **Torrents** lists your folders of `.torrent` files. Open one, filter, **tick only the games you want**, and only those are downloaded. Zipped discs are unpacked for you. A wanted game can also be searched for *inside* those torrents.
 - Whichever way a game arrives, the chain is the same: **download → unpack → convert to GOD → library → drive → console**, tracked in **Wanted → Activity**.
 
-Details: [Wanted](docs/wanted.md) · [Torrents](docs/torrents.md)
+Details: [Discover](docs/discover.md) · [Wanted](docs/wanted.md) · [Torrents](docs/torrents.md)
 
 </details>
 

@@ -72,8 +72,8 @@ pub struct Client {
     agent: ureq::Agent,
     token: Mutex<Option<(String, u64)>>, // token, unix expiry
     last_call: Mutex<Instant>,
-    /// Xbox 360 genres, fetched once.
-    genres: Mutex<Option<Vec<(i64, String)>>>,
+    /// Filter lists and counts for Discover, kept for a while.
+    disc: Mutex<discover::Cache>,
 }
 
 fn now() -> u64 {
@@ -95,7 +95,7 @@ impl Client {
             agent,
             token: Mutex::new(None),
             last_call: Mutex::new(Instant::now() - MIN_GAP),
-            genres: Mutex::new(None),
+            disc: Mutex::new(discover::Cache::default()),
         }
     }
 
@@ -258,6 +258,13 @@ impl Client {
         )?;
         Ok((bytes, "jpg"))
     }
+}
+
+fn now_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
 }
 
 pub(crate) fn parse_candidate(v: &Value) -> Option<Candidate> {

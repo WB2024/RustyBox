@@ -259,3 +259,27 @@ a.stat:hover { border-color: var(--accent); }
 .masonry > .card { break-inside: avoid; }
 
 @media (max-width: 520px) { .ggrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } }
+
+/* Discover */
+.tag { display: inline-block; background: var(--panel2); border: 1px solid var(--line); border-radius: 14px; padding: 2px 10px; font-size: 12.5px; cursor: pointer; color: var(--text); user-select: none; text-decoration: none; }
+.tag:hover { border-color: var(--accent); }
+.tag.on { background: color-mix(in srgb, var(--accent) 20%, var(--panel2)); border-color: var(--accent); }
+.tag small { color: var(--muted); font-size: 11px; }
+.dgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 18px 24px; }
+.dgroup { min-width: 0; }
+.dsuggest { position: absolute; left: 0; right: 0; top: 100%; z-index: 20; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; max-height: 240px; overflow: auto; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
+.dsuggest div { padding: 6px 10px; cursor: pointer; }
+.dsuggest div:hover { background: var(--panel2); }
+.dgridcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.dlist { display: flex; flex-direction: column; gap: 6px; }
+.drow { display: flex; align-items: center; gap: 12px; padding: 6px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.drow:hover { border-color: var(--accent); }
+.drow img, .drow .noimg { width: 40px; height: 54px; object-fit: cover; border-radius: 4px; background: var(--line); flex: none; }
+.dstrip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
+.dvideo { position: relative; flex: none; width: 220px; display: block; border-radius: 6px; overflow: hidden; color: #fff; text-decoration: none; }
+.dvideo img { width: 100%; display: block; aspect-ratio: 16 / 9; object-fit: cover; }
+.dvideo span { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 8px; background: rgba(0, 0, 0, .65); font-size: 12px; }
+.dscore { flex: 1; text-align: center; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 4px; font-size: 22px; font-weight: 700; line-height: 1.1; }
+.dscore small { display: block; font-size: 10.5px; font-weight: 400; color: var(--muted); }
+.drowline { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: baseline; margin-top: 6px; }
+@media (max-width: 640px) { .drowline { grid-template-columns: 1fr; gap: 2px; } }

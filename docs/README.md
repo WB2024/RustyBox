@@ -13,6 +13,7 @@ The [main README](../README.md) covers what RustyBox is and how to get started. 
 | [Drives and import](drives-and-import.md) | The Xbox hard drive through the drive agent, comparing and mirroring, import, tidy rules. |
 | [Conversion](conversion.md) | ISO to GOD and back, extract and pack, ISO checking. |
 | [Console](console.md) | Aurora over FTP: scan, send, replace, browse, self-test. |
+| [Discover](discover.md) | Browsing IGDB with filters (genre, theme, mode, series, developer…), a game's full page, shelves. |
 | [Wanted (Usenet and torrents)](wanted.md) | Searching indexers, SABnzbd, the quality profile, importing finished downloads. |
 | [Torrents](torrents.md) | qBittorrent, torrent indexers, picking files from `.torrent` files. |
 | [Content and updates](content-and-updates.md) | Mods, trainers, homebrew, cheats, saves, title updates. |
