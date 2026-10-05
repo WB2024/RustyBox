@@ -161,6 +161,8 @@ struct Qb {
     cats: Vec<String>,
     /// What it was asked, in order: for the test to check.
     log: Vec<String>,
+    /// Answer "404" to this many file listings, as a big torrent that isn't registered yet does.
+    files_404: u32,
 }
 
 type Shared = Arc<Mutex<Qb>>;
@@ -277,7 +279,11 @@ async fn fake_qbit() -> (String, Shared) {
         }))
         .route("/api/v2/torrents/files", get(move |State(q): State<Shared>, headers: HeaderMap, Query(f): Query<HashMap<String, String>>| async move {
             if !authed(&headers) { return forbidden(); }
-            let g = q.lock().unwrap();
+            let mut g = q.lock().unwrap();
+            if g.files_404 > 0 {
+                g.files_404 -= 1;
+                return StatusCode::NOT_FOUND.into_response();
+            }
             let t = g.torrents.get(&f["hash"]).cloned().unwrap_or_default();
             axum::Json(Value::Array(t.files.iter().enumerate().map(|(i, (n, s, p))| json!({"index": i, "name": n, "size": s, "priority": p})).collect())).into_response()
         }))
@@ -860,7 +866,10 @@ async fn a_one_file_torrent_is_imported_from_a_folder_of_its_own_and_keeps_seedi
         let log: Vec<&String> = g.log.iter().filter(|l| !l.starts_with("login")).collect();
         assert_eq!(
             log,
-            vec![&format!("add {hash} stopped=false category=xbox360")],
+            vec![
+                &format!("add {hash} stopped=true category=xbox360"),
+                &"start".to_string()
+            ],
             "{log:?}"
         );
     }
@@ -1180,4 +1189,77 @@ async fn a_wanted_game_is_searched_for_inside_the_torrent_files_and_one_file_is_
     )
     .await;
     assert_eq!(st, StatusCode::CONFLICT, "{v}");
+}
+
+#[tokio::test]
+async fn only_the_chosen_file_is_ever_switched_on_even_when_qbittorrent_is_slow_or_already_has_the_torrent()
+ {
+    let (base, qb) = fake_qbit().await;
+    let e = env("safe");
+    let app = &e.app;
+    setup(&e, &base, json!({})).await;
+    let t = make_torrent(
+        "Minerva_Myrient",
+        &[
+            ("Redump/Game One (USA).zip", 1_000_000),
+            ("Redump/Game Two (Europe).zip", 2_000_000),
+            ("Redump/Game Three (Japan).zip", 3_000_000),
+        ],
+    );
+    fs::write(e.root.join("torrents/all.torrent"), &t).unwrap();
+    let (st, _) = call(
+        app,
+        "PUT",
+        "/api/torrents/dirs",
+        Some(json!({"dirs": [e.root.join("torrents").to_string_lossy()]})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let hash = torrent::parse(&t).unwrap().info_hash;
+    let prios = |qb: &Shared| -> Vec<u32> {
+        qb.lock().unwrap().torrents[&hash]
+            .files
+            .iter()
+            .map(|f| f.2)
+            .collect()
+    };
+
+    // qBittorrent says "not found" for a while after the add (a big torrent): wait, don't give up
+    // and leave the torrent behind with every file switched on.
+    qb.lock().unwrap().files_404 = 3;
+    let (st, v) = call(
+        app,
+        "POST",
+        "/api/torrents/send",
+        Some(json!({"dir": 0, "file": "all.torrent", "select": [1]})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    assert_eq!(prios(&qb), vec![0, 1, 0]);
+    assert!(!qb.lock().unwrap().torrents[&hash].stopped);
+
+    // The torrent is already in qBittorrent with every file on (as a failed attempt or someone's
+    // add would leave it): choosing a game switches the others off before it runs.
+    {
+        let mut g = qb.lock().unwrap();
+        let tor = g.torrents.get_mut(&hash).unwrap();
+        for f in tor.files.iter_mut() {
+            f.2 = 1;
+        }
+        tor.stopped = true;
+    }
+    let (st, v) = call(
+        app,
+        "POST",
+        "/api/torrents/send",
+        Some(json!({"dir": 0, "file": "all.torrent", "select": [2]})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    assert_eq!(v["existed"], true);
+    assert_eq!(
+        prios(&qb),
+        vec![0, 0, 1],
+        "nothing but the chosen file is on: {v}"
+    );
 }

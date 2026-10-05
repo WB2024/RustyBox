@@ -133,6 +133,8 @@ pub struct FileInfo {
     pub name: String,
     pub size: u64,
     pub priority: u32,
+    /// 0.0 to 1.0: how much of it is downloaded.
+    pub progress: f64,
 }
 
 // Logged-in sessions by server address, so a poll every few seconds doesn't log in every time.
@@ -425,6 +427,7 @@ impl Qbit {
                         name: f["name"].as_str().unwrap_or("").into(),
                         size: f["size"].as_u64().unwrap_or(0),
                         priority: f["priority"].as_u64().unwrap_or(1) as u32,
+                        progress: f["progress"].as_f64().unwrap_or(0.0),
                     })
                     .collect()
             })
@@ -465,6 +468,14 @@ impl Qbit {
             Err(_) => self
                 .post("torrents/resume", &[("hashes", hash)])
                 .map(|_| ()),
+        }
+    }
+
+    /// Stop a torrent without removing it (`stop` in qBittorrent 5, `pause` in 4).
+    pub fn stop(&self, hash: &str) -> Result<(), Error> {
+        match self.post("torrents/stop", &[("hashes", hash)]) {
+            Ok(_) => Ok(()),
+            Err(_) => self.post("torrents/pause", &[("hashes", hash)]).map(|_| ()),
         }
     }
 

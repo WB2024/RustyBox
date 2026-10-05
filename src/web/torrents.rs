@@ -263,50 +263,81 @@ fn add_chosen(
         return Err(Error::validation("A chosen file isn't in the torrent"));
     }
     let existed = !q.info(std::slice::from_ref(&t.info_hash))?.is_empty();
-    if existed {
-        q.set_priority(&t.info_hash, &wanted, 1)?;
-        q.start(&t.info_hash)?;
-    } else {
-        let partial = wanted.len() < t.files.len();
+    let hash = t.info_hash.clone();
+    // Whatever goes wrong after this point, a torrent we added is taken out again (its files are
+    // never touched), so nothing is left behind that could be started with every file switched on.
+    let undo = |e: Error| -> Error {
+        if !existed {
+            let _ = q.remove(&hash, false);
+        }
+        e
+    };
+    if !existed {
         // Stopped first, so nothing is fetched before the unwanted files are switched off.
         q.add(
             AddSource::File {
                 name: "chosen.torrent",
                 bytes: &bytes,
             },
-            partial,
-        )?;
-        if partial {
-            // Wait for qBittorrent to list the files (it reads them from the torrent at once).
-            let mut have = 0;
-            for _ in 0..40 {
-                have = q.files(&t.info_hash)?.len();
-                if have == t.files.len() {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(250));
+            true,
+        )
+        .map_err(&undo)?;
+    }
+    // Wait for qBittorrent to list the files. A big torrent takes a while to appear at all, and
+    // until it does the answer is "not found": that just means wait.
+    let mut listed = Vec::new();
+    for _ in 0..240 {
+        match q.files(&hash) {
+            Ok(f) if f.len() == t.files.len() => {
+                listed = f;
+                break;
             }
-            if have != t.files.len() {
-                // Don't leave a stopped torrent behind that nobody will start.
-                let _ = q.remove(&t.info_hash, false);
-                return Err(Error::backend(
-                    "qBittorrent didn't list the torrent's files in time",
-                ));
-            }
-            let skip: Vec<usize> = all
-                .iter()
-                .copied()
-                .filter(|i| !wanted.contains(i))
-                .collect();
-            let done = q
-                .skip_files(&t.info_hash, &skip)
-                .and_then(|_| q.start(&t.info_hash));
-            if let Err(e) = done {
-                let _ = q.remove(&t.info_hash, false);
-                return Err(e);
-            }
+            _ => std::thread::sleep(Duration::from_millis(250)),
         }
     }
+    if listed.len() != t.files.len() {
+        return Err(undo(Error::backend(
+            "qBittorrent didn't list the torrent's files in time, so nothing was started",
+        )));
+    }
+    // A qBittorrent that ignored "stopped" would be fetching everything by now: stop it again.
+    if !existed {
+        let _ = q.stop(&hash);
+    }
+    // Which of qBittorrent's files is which, by name and size, not by position alone.
+    for i in &wanted {
+        let (f, mine) = (&listed[*i], &t.files[*i]);
+        if f.size != mine.size || !f.name.ends_with(mine.path.as_str()) {
+            return Err(undo(Error::backend(
+                "qBittorrent lists this torrent's files in a different order, so nothing was started",
+            )));
+        }
+    }
+    // Chosen files on; everything else off, unless it was started before (it already has some
+    // data, and the user asked for that earlier).
+    let skip: Vec<usize> = all
+        .iter()
+        .copied()
+        .filter(|i| !wanted.contains(i) && (!existed || listed[*i].progress == 0.0))
+        .collect();
+    let set = (|| {
+        q.skip_files(&hash, &skip)?;
+        if existed {
+            q.set_priority(&hash, &wanted, 1)?;
+        }
+        // Look again before starting: no file outside the choice may be switched on.
+        let now = q.files(&hash)?;
+        let bad = now.iter().enumerate().any(|(i, f)| {
+            (wanted.contains(&i) && f.priority == 0) || (skip.contains(&i) && f.priority != 0)
+        });
+        if bad || now.len() != t.files.len() {
+            return Err(Error::backend(
+                "qBittorrent didn't switch the files as asked, so nothing was started",
+            ));
+        }
+        q.start(&hash)
+    })();
+    set.map_err(&undo)?;
     let size: u64 = wanted.iter().map(|i| t.files[*i].size).sum();
     let title = if wanted.len() == 1 {
         let f = &t.files[wanted[0]].path;
