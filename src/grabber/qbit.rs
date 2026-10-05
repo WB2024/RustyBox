@@ -90,6 +90,9 @@ pub enum Phase {
 impl TorrentInfo {
     pub fn phase(&self) -> Phase {
         match self.state.as_str() {
+            // An error somewhere in a big torrent (say a file nobody asked for) doesn't matter once
+            // everything that was chosen has arrived.
+            "error" | "missingFiles" if self.left == 0 && self.percent >= 99.99 => Phase::Done,
             "error" | "missingFiles" => Phase::Failed,
             "uploading" | "stalledUP" | "queuedUP" | "forcedUP" | "pausedUP" | "stoppedUP"
             | "checkingUP" => Phase::Done,

@@ -1523,9 +1523,6 @@ pub async fn poll_downloads(st: &Arc<AppState>) {
     let Ok(open) = st.db.run(|c| store::open_grabs(c)).await else {
         return;
     };
-    if open.is_empty() {
-        return;
-    }
     for g in open
         .iter()
         .filter(|g| matches!(g.status.as_str(), "importing" | "unpacking"))
@@ -1536,8 +1533,12 @@ pub async fn poll_downloads(st: &Arc<AppState>) {
         .into_iter()
         .filter(|g| !matches!(g.status.as_str(), "importing" | "unpacking"))
         .collect();
-    let (torrents, usenet): (Vec<_>, Vec<_>) =
+    let (mut torrents, usenet): (Vec<_>, Vec<_>) =
         waiting.into_iter().partition(|g| g.protocol == "torrent");
+    // Torrents that were failed on a passing "error" are looked at again (see `poll_torrents`).
+    if let Ok(failed) = st.db.run(|c| store::recent_failed_torrents(c)).await {
+        torrents.extend(failed);
+    }
     poll_usenet(st, &cfg, usenet).await;
     poll_torrents(st, &cfg, torrents).await;
 }
@@ -1555,6 +1556,24 @@ async fn poll_torrents(st: &Arc<AppState>, cfg: &Config, grabs: Vec<store::Grab>
     for g in grabs {
         let gid = g.id;
         let hash = g.sab_id.clone().unwrap_or_default().to_lowercase();
+        // A download marked failed earlier is only revisited to rescue it: its torrent has
+        // finished what was chosen after all.
+        if g.status == "failed" {
+            if let Some(i) = infos.iter().find(|i| i.hash == hash)
+                && i.phase() == Phase::Done
+            {
+                let (guid, title, wid) = (g.guid.clone(), g.title.clone(), g.wanted_id);
+                let _ = st
+                    .db
+                    .run(move |c| {
+                        store::unblock_download(c, &guid, &title)?;
+                        store::set_wanted_status(c, wid, "downloading")
+                    })
+                    .await;
+                download_done(st, cfg, &g, i.content_path.clone()).await;
+            }
+            continue;
+        }
         match infos.iter().find(|i| i.hash == hash) {
             Some(i) => match i.phase() {
                 Phase::Queued | Phase::Downloading => {

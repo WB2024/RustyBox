@@ -1312,3 +1312,50 @@ async fn a_total_that_qbittorrent_has_not_worked_out_is_fixed_before_anything_ru
     );
     assert!(!g.torrents[&hash].stopped, "and then it was started");
 }
+
+#[tokio::test]
+async fn a_passing_qbittorrent_error_does_not_fail_a_download_that_then_finishes() {
+    let (base, qb) = fake_qbit().await;
+    let e = env("err");
+    let app = &e.app;
+    setup(&e, &base, json!({})).await;
+    let t = make_torrent(
+        "Minerva_Myrient",
+        &[("A/One.zip", 1_000_000), ("A/Two.zip", 2_000_000)],
+    );
+    fs::write(e.root.join("torrents/e.torrent"), &t).unwrap();
+    call(
+        app,
+        "PUT",
+        "/api/torrents/dirs",
+        Some(json!({"dirs": [e.root.join("torrents").to_string_lossy()]})),
+    )
+    .await;
+    let (st, v) = call(
+        app,
+        "POST",
+        "/api/torrents/send",
+        Some(json!({"dir": 0, "file": "e.torrent", "select": [0]})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    let hash = torrent::parse(&t).unwrap().info_hash;
+    let status = |a: &Value| a["grabs"][0]["grab"]["status"].as_str().map(String::from);
+
+    // An error while it is half done: failed and blocklisted, as before.
+    set_state(&qb, &hash, "error", 0.4, "");
+    web::poll_downloads(&e.state).await;
+    let (_, a) = call(app, "GET", "/api/grab/activity", None).await;
+    assert_eq!(status(&a).as_deref(), Some("failed"), "{a}");
+    let (_, bl) = call(app, "GET", "/api/grab/blocklist", None).await;
+    assert_eq!(bl["blocked"].as_array().map_or(0, |l| l.len()), 1, "{bl}");
+
+    // The torrent turns out to have everything that was chosen: the download is picked up again
+    // and taken off the blocklist.
+    set_state(&qb, &hash, "uploading", 1.0, "/downloads/Minerva_Myrient");
+    web::poll_downloads(&e.state).await;
+    let (_, a) = call(app, "GET", "/api/grab/activity", None).await;
+    assert_ne!(status(&a).as_deref(), Some("failed"), "{a}");
+    let (_, bl) = call(app, "GET", "/api/grab/blocklist", None).await;
+    assert_eq!(bl["blocked"].as_array().map_or(0, |l| l.len()), 0, "{bl}");
+}

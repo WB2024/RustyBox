@@ -222,6 +222,25 @@ pub fn open_grabs(c: &Connection) -> Result<Vec<Grab>, Error> {
     Ok(s.query_map([], gmap)?.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// Torrent downloads that were marked failed because qBittorrent said "error", in the last few
+/// days: if the torrent turns out to be finished after all, they are picked up again.
+pub fn recent_failed_torrents(c: &Connection) -> Result<Vec<Grab>, Error> {
+    let mut s = c.prepare(&format!(
+        "SELECT {GCOLS} FROM grabs WHERE protocol = 'torrent' AND status = 'failed' AND error LIKE 'qBittorrent reports%' AND updated > ?1 ORDER BY id"
+    ))?;
+    Ok(s.query_map([now() as i64 - 3 * 86_400], gmap)?
+        .collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Take a download's entries off the blocklist (it was blocked by mistake).
+pub fn unblock_download(c: &Connection, guid: &str, title: &str) -> Result<(), Error> {
+    c.execute(
+        "DELETE FROM blocklist WHERE guid = ?1 OR lower(title) = lower(?2)",
+        params![guid, title],
+    )?;
+    Ok(())
+}
+
 pub fn has_open_grab(c: &Connection, wanted_id: i64) -> Result<bool, Error> {
     Ok(c.query_row(
         "SELECT count(*) FROM grabs WHERE wanted_id = ?1 AND status IN ('queued','downloading','completed','unpacking','importing')",
