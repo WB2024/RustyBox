@@ -11,6 +11,12 @@ const FAT32_MAX = 4 * 1024 ** 3 - 1;
 const MAX_FILE = { fat32: FAT32_MAX };
 const WORKERS = 3;
 
+// Resolves once the drives remembered by this browser have been looked at (so a page doesn't
+// conclude "no drive here" before that has happened).
+let readyDone;
+const readyP = new Promise((r) => { readyDone = r; });
+export const whenReady = () => Promise.race([readyP, new Promise((r) => setTimeout(r, 3000))]);
+
 export const supported = () => !!(window.isSecureContext && window.showDirectoryPicker);
 
 /** Where to open RustyBox for it to work: the same server over HTTPS. */
@@ -285,6 +291,10 @@ export async function share({ handle, name, writable, fsType }) {
 
 /** On every page load: take up the drives shared before, as far as the browser allows without a click. */
 export async function resume() {
+  try { await resumeAll(); } finally { readyDone(); }
+}
+
+async function resumeAll() {
   if (!supported()) return;
   for (const d of await loadDrives()) {
     try {

@@ -17,7 +17,19 @@ const QUICK = [
 
 const copyText = (t) => navigator.clipboard?.writeText(t).then(() => toast("Copied", "ok"), () => {});
 
+let stopWatching = null;
+
 export async function render(root, ctx) {
+  // The drives this browser shares are picked up as the page starts: wait for that, then redraw
+  // when one connects (the page was drawn "offline" a moment earlier otherwise).
+  await browserDrive.whenReady();
+  if (stopWatching) stopWatching();
+  let seen = browserDrive.drives().filter((d) => d.state === "connected").length;
+  stopWatching = browserDrive.onChange(() => {
+    const now = browserDrive.drives().filter((d) => d.state === "connected").length;
+    if (now > seen) { seen = now; setTimeout(() => { if (root.isConnected) render(root, ctx); }, 1500); } else seen = now;
+  });
+  ctx.leave.push(() => { if (stopWatching) { stopWatching(); stopWatching = null; } });
   const libs = await api("/api/libraries");
   const drives = libs.filter((l) => ["iso", "god"].includes(l.kind) && l.paths.some((p) => p.remote_url)).map((l) => {
     const remote = l.paths.filter((p) => p.remote_url);
