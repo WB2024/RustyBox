@@ -1174,6 +1174,65 @@ async fn import_grab(st: &Arc<AppState>, g: &store::Grab) -> ApiResult<Started> 
     } else {
         cfg.map_path(&raw)
     };
+    // A torrent of which only some files were chosen (a game out of a collection of thousands):
+    // import exactly those, never whatever else is lying in the folder (other files the torrent
+    // started on, other games).
+    if g.protocol == "torrent"
+        && !is_unpack_dir(&raw)
+        && cfg.qbit.configured()
+        && let Some(hash) = g.sab_id.clone()
+    {
+        let q = cfg.qbit.clone();
+        let listed = blocking(move || {
+            let files = q.files(&hash)?;
+            let info = q.info(std::slice::from_ref(&hash))?.into_iter().next();
+            Ok((files, info))
+        })
+        .await;
+        if let Ok((files, Some(info))) = listed {
+            let chosen: Vec<&crate::grabber::qbit::FileInfo> = files
+                .iter()
+                .filter(|f| f.priority > 0 && f.progress >= 0.999)
+                .collect();
+            if !chosen.is_empty() && chosen.len() < files.len() {
+                let base = cfg.map_path(&info.save_path);
+                let paths: Vec<String> = chosen
+                    .iter()
+                    .map(|f| format!("{}/{}", base.trim_end_matches('/'), f.name))
+                    .collect();
+                let ext = |p: &String, e: &str| p.to_lowercase().ends_with(e);
+                let zips: Vec<String> = paths.iter().filter(|p| ext(p, ".zip")).cloned().collect();
+                let isos: Vec<String> = paths.iter().filter(|p| ext(p, ".iso")).cloned().collect();
+                if !isos.is_empty() {
+                    // Chosen disc images: each is linked into a folder of its own.
+                    let id = g.id;
+                    path = blocking(move || {
+                        let mut dir = String::new();
+                        for o in &isos {
+                            dir = stage_file(o, id)?;
+                        }
+                        Ok(dir)
+                    })
+                    .await?;
+                } else if !zips.is_empty() {
+                    let plans: Vec<unpack::ZipPlan> = blocking(move || {
+                        Ok(zips
+                            .iter()
+                            .filter_map(|z| unpack::inspect(std::path::Path::new(z)).ok())
+                            .collect())
+                    })
+                    .await?;
+                    if plans.is_empty() {
+                        return Err(ApiError::bad(
+                            "The zip you chose holds no disc image, so there is nothing to import.",
+                        ));
+                    }
+                    return start_unpack(st, g, &path, plans).await.map(Started::Unpack);
+                }
+                // Anything else (a game folder, say) is imported from the download folder as before.
+            }
+        }
+    }
     // A one-file download (qBittorrent reports the file itself): import it from a folder of its own,
     // so the rest of what is next to it isn't swept up. The file is hardlinked in (a copy if the
     // disk differs) and that link is what gets moved on.

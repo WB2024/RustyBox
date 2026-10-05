@@ -268,7 +268,7 @@ async fn fake_qbit() -> (String, Shared) {
                 let wanted: u64 = if g.stale_total { 94_000_000_000 } else { t.files.iter().filter(|f| f.2 > 0).map(|f| f.1).sum() };
                 json!({"hash": h, "name": t.name, "state": t.state, "progress": t.progress, "size": wanted,
                        "amount_left": if t.progress >= 1.0 { 0 } else { 1000 }, "content_path": t.content_path,
-                       "save_path": "/downloads", "ratio": 0.0})
+                       "save_path": std::path::Path::new(&t.content_path).parent().map(|p| p.to_string_lossy().to_string()).filter(|p| !p.is_empty()).unwrap_or("/downloads".into()), "ratio": 0.0})
             }).collect();
             axum::Json(Value::Array(list)).into_response()
         }))
@@ -288,7 +288,7 @@ async fn fake_qbit() -> (String, Shared) {
                 return StatusCode::NOT_FOUND.into_response();
             }
             let t = g.torrents.get(&f["hash"]).cloned().unwrap_or_default();
-            axum::Json(Value::Array(t.files.iter().enumerate().map(|(i, (n, s, p))| json!({"index": i, "name": n, "size": s, "priority": p})).collect())).into_response()
+            axum::Json(Value::Array(t.files.iter().enumerate().map(|(i, (n, s, p))| json!({"index": i, "name": n, "size": s, "priority": p, "progress": t.progress})).collect())).into_response()
         }))
         .route("/api/v2/torrents/filePrio", post(move |State(q): State<Shared>, headers: HeaderMap, Form(f): Form<HashMap<String, String>>| async move {
             if !authed(&headers) { return forbidden(); }
@@ -603,6 +603,16 @@ async fn files_are_chosen_from_a_torrent_in_a_folder_then_fetched_unpacked_and_i
         "Game One (USA).iso",
         &iso,
     );
+    // Another game's zip is lying in the same folder (a piece of the torrent that was started on
+    // but not chosen): it must not be unpacked or imported.
+    write_iso(&e.root.join("downloads/tmp2.iso"), 0x4D53_0805, 0x54E3_4DF4);
+    let iso2 = fs::read(e.root.join("downloads/tmp2.iso")).unwrap();
+    fs::remove_file(e.root.join("downloads/tmp2.iso")).unwrap();
+    make_zip(
+        &content.join("Redump/Microsoft - Xbox 360/Game Two (Europe).zip"),
+        "Game Two (Europe).iso",
+        &iso2,
+    );
     set_state(&qb, &hash, "stalledUP", 1.0, &content.to_string_lossy());
     web::poll_downloads(&e.state).await;
     let (_, a) = call(app, "GET", "/api/grab/activity", None).await;
@@ -627,6 +637,10 @@ async fn files_are_chosen_from_a_torrent_in_a_folder_then_fetched_unpacked_and_i
     // The disc image is in the library; the zip is untouched; our unpacked copy is gone; and the
     // torrent (with its files) was taken out of qBittorrent as asked.
     assert!(e.root.join("isos/Game One (USA).iso").is_file());
+    assert!(
+        !e.root.join("isos/Game Two (Europe).iso").exists(),
+        "only the chosen zip was opened and imported"
+    );
     assert!(
         content
             .join("Redump/Microsoft - Xbox 360/Game One (USA).zip")
